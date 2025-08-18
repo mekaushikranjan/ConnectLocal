@@ -73,6 +73,9 @@ router.post('/register', asyncHandler(async (req, res) => {
     finalDisplayName = [derivedFirst, derivedLast].filter(Boolean).join(' ').trim();
   }
 
+  // Auto-verify email in development mode
+  const shouldAutoVerify = process.env.NODE_ENV === 'development' || process.env.AUTO_VERIFY_EMAIL === 'true';
+
   const user = await User.create({
     email: email.toLowerCase(),
     password,
@@ -81,7 +84,8 @@ router.post('/register', asyncHandler(async (req, res) => {
     last_name: derivedLast,
     phone_number: phoneNumber,
     email_verification_token: verificationToken,
-    email_verification_expires: verificationExpires
+    email_verification_expires: verificationExpires,
+    email_verified: shouldAutoVerify // Auto-verify in development
   });
 
   // Send verification email
@@ -104,7 +108,9 @@ router.post('/register', asyncHandler(async (req, res) => {
 
   res.status(201).json({
     success: true,
-    message: 'User registered successfully. Please check your email for verification.',
+    message: shouldAutoVerify 
+      ? 'User registered successfully and email auto-verified (development mode).'
+      : 'User registered successfully. Please check your email for verification.',
     data: {
       user: {
         id: user.id,
@@ -117,8 +123,10 @@ router.post('/register', asyncHandler(async (req, res) => {
         status: user.status,
         createdAt: user.createdAt
       },
-      requiresVerification: true,
-      message: 'Please check your email and click the verification link to complete your registration.'
+      requiresVerification: !shouldAutoVerify,
+      message: shouldAutoVerify 
+        ? 'Email auto-verified in development mode.'
+        : 'Please check your email and click the verification link to complete your registration.'
     }
   });
 }));
@@ -183,13 +191,19 @@ router.post('/login', asyncHandler(async (req, res) => {
     email: user.email
   });
 
+  // In development mode, auto-verify email for testing
   if (!user.email_verified) {
-    console.log('❌ Login failed: Email not verified');
-    return res.status(401).json({
-      success: false,
-      message: 'Please verify your email address before logging in. Check your inbox for the verification link.',
-      requiresVerification: true
-    });
+    if (process.env.NODE_ENV === 'development' || process.env.AUTO_VERIFY_EMAIL === 'true') {
+      console.log('🔧 Development mode: Auto-verifying email');
+      await user.update({ email_verified: true });
+    } else {
+      console.log('❌ Login failed: Email not verified');
+      return res.status(401).json({
+        success: false,
+        message: 'Please verify your email address before logging in. Check your inbox for the verification link.',
+        requiresVerification: true
+      });
+    }
   }
 
   // Check if account is active
