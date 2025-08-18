@@ -1183,21 +1183,325 @@ const options = {
   ],
   explorer: true,
   customCss: `
-    .swagger-ui .topbar { display: none }
-    .swagger-ui .info .title { color: #3B82F6; font-size: 2.5em; font-weight: 700; }
-    .swagger-ui .info .description { font-size: 1.1em; line-height: 1.6; }
-    .swagger-ui .scheme-container { background: #f8fafc; border-radius: 8px; padding: 16px; }
-    .swagger-ui .auth-wrapper { background: #f1f5f9; border-radius: 8px; padding: 12px; }
-    .swagger-ui .opblock-tag { font-size: 1.2em; font-weight: 600; color: #1e293b; }
-    .swagger-ui .opblock-summary-description { color: #64748b; }
-    .swagger-ui .opblock.opblock-get .opblock-summary-method { background: #10b981; }
-    .swagger-ui .opblock.opblock-post .opblock-summary-method { background: #3b82f6; }
-    .swagger-ui .opblock.opblock-put .opblock-summary-method { background: #f59e0b; }
-    .swagger-ui .opblock.opblock-delete .opblock-summary-method { background: #ef4444; }
-    .swagger-ui .btn.execute { background: #3b82f6; border-color: #2563eb; }
-    .swagger-ui .btn.execute:hover { background: #2563eb; }
-    .swagger-ui .response-col_status { font-weight: 600; }
-    .swagger-ui .response-col_description { color: #64748b; }
+    /* Hide default topbar since we have custom header */
+    .swagger-ui .topbar { display: none !important; }
+    
+    /* Import custom CSS file */
+    @import url('./swagger-custom.css');
+    
+    /* Additional custom styles */
+    .swagger-ui .info .title { 
+      color: #3B82F6; 
+      font-size: 2.5em; 
+      font-weight: 700; 
+      text-align: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      margin: 0;
+      border-radius: 12px 12px 0 0;
+    }
+    
+    .swagger-ui .info .description { 
+      font-size: 1.1em; 
+      line-height: 1.6; 
+      padding: 30px;
+      background: #f8f9fa;
+      border-radius: 0 0 12px 12px;
+    }
+    
+    .swagger-ui .scheme-container { 
+      background: #f8fafc; 
+      border-radius: 8px; 
+      padding: 16px; 
+      margin: 20px 0;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+    
+    .swagger-ui .auth-wrapper { 
+      background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); 
+      border-radius: 12px; 
+      padding: 25px; 
+      margin: 20px 0;
+      border: 1px solid #dee2e6;
+    }
+    
+    .swagger-ui .opblock-tag { 
+      font-size: 1.2em; 
+      font-weight: 600; 
+      color: #1e293b; 
+      margin: 30px 0 20px 0;
+      padding: 15px 20px;
+      background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+    }
+    
+    .swagger-ui .opblock-summary-description { 
+      color: #64748b; 
+      font-size: 16px;
+      font-weight: 500;
+    }
+    
+    .swagger-ui .opblock.opblock-get .opblock-summary-method { 
+      background: #10b981; 
+      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+    }
+    
+    .swagger-ui .opblock.opblock-post .opblock-summary-method { 
+      background: #3b82f6; 
+      box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    }
+    
+    .swagger-ui .opblock.opblock-put .opblock-summary-method { 
+      background: #f59e0b; 
+      box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+    }
+    
+    .swagger-ui .opblock.opblock-delete .opblock-summary-method { 
+      background: #ef4444; 
+      box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+    }
+    
+    .swagger-ui .btn.execute { 
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+      border: none;
+      border-radius: 8px;
+      padding: 12px 24px;
+      font-weight: 600;
+      color: white;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+    
+    .swagger-ui .btn.execute:hover { 
+      transform: translateY(-2px);
+      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+    }
+    
+    .swagger-ui .response-col_status { 
+      font-weight: 600; 
+      background: #f8f9fa;
+      padding: 12px;
+    }
+    
+    .swagger-ui .response-col_description { 
+      color: #64748b; 
+      padding: 12px;
+    }
+    
+    /* Search functionality styles */
+    .search-container {
+      position: relative;
+      margin-left: 20px;
+    }
+    
+    .search-input {
+      background: rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 20px;
+      padding: 8px 16px;
+      color: white;
+      font-size: 14px;
+      width: 250px;
+      backdrop-filter: blur(10px);
+    }
+    
+    .search-input::placeholder {
+      color: rgba(255,255,255,0.7);
+    }
+    
+    .search-results {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      max-height: 300px;
+      overflow-y: auto;
+      z-index: 1000;
+      display: none;
+    }
+    
+    .search-result {
+      padding: 12px 16px;
+      border-bottom: 1px solid #f1f5f9;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    
+    .search-result:hover {
+      background: #f8f9fa;
+    }
+    
+    .no-results {
+      padding: 16px;
+      text-align: center;
+      color: #64748b;
+    }
+    
+    /* Copy button styles */
+    .copy-button {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 12px;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    
+    pre:hover .copy-button {
+      opacity: 1;
+    }
+    
+    /* Progress bar styles */
+    .progress-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: #f1f5f9;
+      z-index: 9999;
+    }
+    
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+    
+    /* Theme toggle styles */
+    .theme-toggle {
+      background: rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 18px;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(10px);
+    }
+    
+    .theme-toggle:hover {
+      background: rgba(255,255,255,0.3);
+      transform: scale(1.1);
+    }
+    
+    /* Notification styles */
+    .notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      color: white;
+      font-weight: 500;
+      z-index: 10000;
+      animation: slideIn 0.3s ease;
+    }
+    
+    .notification-success {
+      background: #10b981;
+    }
+    
+    .notification-info {
+      background: #3b82f6;
+    }
+    
+    .notification-error {
+      background: #ef4444;
+    }
+    
+    @keyframes slideIn {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+    
+    /* Dark theme styles */
+    .dark-theme {
+      background: #1a1a1a;
+      color: #ffffff;
+    }
+    
+    .dark-theme .swagger-ui .info {
+      background: #2d2d2d;
+      color: #ffffff;
+    }
+    
+    .dark-theme .swagger-ui .opblock {
+      background: #2d2d2d;
+      border-color: #404040;
+    }
+    
+    .dark-theme .swagger-ui .opblock-summary {
+      background: #404040;
+    }
+    
+    /* Mobile menu styles */
+    .menu-toggle {
+      display: none;
+      background: rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 8px;
+      padding: 8px;
+      color: white;
+      font-size: 18px;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+    }
+    
+    @media (max-width: 768px) {
+      .menu-toggle {
+        display: block;
+      }
+      
+      .header-nav {
+        display: none;
+      }
+      
+      .header-nav.mobile-open {
+        display: flex;
+        flex-direction: column;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: rgba(102, 126, 234, 0.95);
+        backdrop-filter: blur(10px);
+        padding: 20px;
+        border-radius: 0 0 12px 12px;
+      }
+      
+      .search-container {
+        margin-left: 0;
+        margin-top: 15px;
+        width: 100%;
+      }
+      
+      .search-input {
+        width: 100%;
+      }
+    }
   `,
   customSiteTitle: 'LocalConnect API Documentation',
   customfavIcon: '/favicon.ico',

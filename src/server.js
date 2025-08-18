@@ -3,6 +3,12 @@ import { sequelize } from './config/database.js';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// ES module __dirname equivalent
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
@@ -375,26 +381,56 @@ app.get('/network-info', (req, res) => {
 
 // API documentation setup
 const setupSwaggerRoutes = async () => {
-  // Enable Swagger in all environments for better API documentation access
-  const { default: swaggerUi } = await import('swagger-ui-express');
-  const { default: swaggerSpec } = await import('./config/swagger.js');
+  try {
+    console.log('Setting up Swagger documentation...');
+    
+    // Enable Swagger in all environments for better API documentation access
+    const { default: swaggerUi } = await import('swagger-ui-express');
+    const { default: swaggerSpec } = await import('./config/swagger.js');
 
-  // Serve Swagger UI
-  app.use(['/api-docs', '/docs'], swaggerUi.serve);
-  app.get(['/api-docs', '/docs'], swaggerUi.setup(swaggerSpec, {
-    customCss: '.swagger-ui .topbar { display: none }',
-    customSiteTitle: process.env.SWAGGER_TITLE || 'LocalConnect API Documentation',
-    swaggerOptions: {
-      persistAuthorization: true
-    }
-  }));
+    console.log('Swagger modules imported successfully');
 
-  // Serve Swagger JSON
-  app.get('/api-docs.json', (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    res.send(swaggerSpec);
-  });
+    // Serve Swagger UI with enhanced features
+    app.use(['/api-docs', '/docs'], swaggerUi.serve);
+    app.get(['/api-docs', '/docs'], swaggerUi.setup(swaggerSpec, {
+      customCss: swaggerSpec.customCss,
+      customSiteTitle: process.env.SWAGGER_TITLE || 'LocalConnect API Documentation',
+      customJs: '/swagger-enhancements.js',
+      swaggerOptions: {
+        persistAuthorization: true,
+        docExpansion: 'list',
+        filter: true,
+        showRequestHeaders: true,
+        showCommonExtensions: true,
+        tryItOutEnabled: true,
+        displayRequestDuration: true,
+        defaultModelsExpandDepth: 2,
+        defaultModelExpandDepth: 2,
+        displayOperationId: false,
+        supportedSubmitMethods: ['get', 'post', 'put', 'delete', 'patch'],
+        validatorUrl: null,
+      }
+    }));
 
+    // Serve custom JavaScript enhancements
+    app.get('/swagger-enhancements.js', (req, res) => {
+      res.setHeader('Content-Type', 'application/javascript');
+      res.sendFile(path.join(__dirname, 'config', 'swagger-enhancements.js'));
+    });
+
+    // Serve Swagger JSON
+    app.get('/api-docs.json', (req, res) => {
+      res.setHeader('Content-Type', 'application/json');
+      res.send(swaggerSpec);
+    });
+
+    console.log('Swagger documentation setup completed successfully');
+    console.log('Swagger UI available at: /api-docs and /docs');
+    console.log('Swagger JSON available at: /api-docs.json');
+  } catch (error) {
+    console.error('Error setting up Swagger documentation:', error);
+    throw error;
+  }
 };
 
 // Initialize Swagger docs
