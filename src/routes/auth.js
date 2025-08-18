@@ -929,7 +929,92 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
   }
 }));
 
+/**
+ * @route   GET /api/auth/reset-password
+ * @desc    Reset password page (GET endpoint for email links)
+ * @access  Public
+ */
+router.get('/reset-password', asyncHandler(async (req, res) => {
+  const { token: resetToken } = req.query;
 
+  if (!resetToken) {
+    return res.status(400).json({
+      success: false,
+      message: 'Reset token is required'
+    });
+  }
+
+  try {
+    // Verify the reset token
+    const decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
+    
+    if (decoded.type !== 'password_reset') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid reset token'
+      });
+    }
+
+    const user = await User.findByPk(decoded.userId);
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // For mobile apps, redirect to the app using a deep link
+    const appScheme = process.env.APP_SCHEME || 'localconnect';
+    const redirectUrl = `${appScheme}://auth/reset-password?token=${resetToken}`;
+    
+    // Create a simple HTML page that redirects to the mobile app
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Reset Password - LocalConnect</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+          .title { color: #333; font-size: 24px; margin-bottom: 20px; }
+          .message { color: #666; margin-bottom: 30px; }
+          .button { background: #4A90E2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; }
+        </style>
+      </head>
+      <body>
+        <div class="title">🔐 Reset Your Password</div>
+        <div class="message">You will be redirected to the LocalConnect app to reset your password.</div>
+        <p>If you're not redirected automatically, <a href="${redirectUrl}" class="button">Open LocalConnect App</a></p>
+        <script>
+          // Try to open the mobile app
+          window.location.href = '${redirectUrl}';
+          
+          // Fallback: if app doesn't open within 3 seconds, show manual link
+          setTimeout(function() {
+            document.body.innerHTML = '<div class="title">🔐 Reset Your Password</div><div class="message">Please open the LocalConnect app to reset your password.</div><a href="${redirectUrl}" class="button">Open LocalConnect App</a>';
+          }, 3000);
+        </script>
+      </body>
+      </html>
+    `;
+    
+    res.send(html);
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired reset token'
+      });
+    }
+    
+    logger.error('Password reset token verification error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to verify reset token'
+    });
+  }
+}));
 
 /**
  * @route   POST /api/auth/verify-email
@@ -1002,6 +1087,103 @@ router.post('/verify-email', asyncHandler(async (req, res) => {
       requiresVerification: false
     }
   });
+}));
+
+/**
+ * @route   GET /api/auth/verify-email
+ * @desc    Verify email with token (GET endpoint for email links)
+ * @access  Public
+ */
+router.get('/verify-email', asyncHandler(async (req, res) => {
+  const { token: verificationToken } = req.query;
+
+  if (!verificationToken) {
+    return res.status(400).json({
+      success: false,
+      message: 'Verification token is required'
+    });
+  }
+
+  const user = await User.findOne({
+    where: {
+      email_verification_token: verificationToken,
+      email_verification_expires: { [Op.gt]: new Date() }
+    }
+  });
+
+  if (!user) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid or expired verification token'
+    });
+  }
+
+  await user.update({
+    email_verified: true,
+    email_verification_token: null,
+    email_verification_expires: null
+  });
+
+  // Generate JWT token after email verification
+  const token = jwt.sign(
+    { userId: user.id },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+  );
+
+  // Generate refresh token
+  const refreshToken = jwt.sign(
+    { userId: user.id, type: 'refresh' },
+    process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
+  );
+
+  // Create verification success notification
+  await Notification.createNotification({
+    recipientId: user.id,
+    title: 'Email Verified!',
+    message: 'Your email has been successfully verified. You now have full access to all features.',
+    type: 'account_verification',
+    priority: 'normal'
+  });
+
+  // For mobile apps, redirect to the app using a deep link
+  // The app will handle the verification success
+  const appScheme = process.env.APP_SCHEME || 'localconnect';
+  const redirectUrl = `${appScheme}://auth/email-verification?status=success&token=${token}&refreshToken=${refreshToken}`;
+  
+  // Create a simple HTML page that redirects to the mobile app
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Email Verified - LocalConnect</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+        .success { color: #4CAF50; font-size: 24px; margin-bottom: 20px; }
+        .message { color: #666; margin-bottom: 30px; }
+        .button { background: #4A90E2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; }
+      </style>
+    </head>
+    <body>
+      <div class="success">✅ Email Verified Successfully!</div>
+      <div class="message">Your email has been verified. You will be redirected to the LocalConnect app.</div>
+      <p>If you're not redirected automatically, <a href="${redirectUrl}" class="button">Open LocalConnect App</a></p>
+      <script>
+        // Try to open the mobile app
+        window.location.href = '${redirectUrl}';
+        
+        // Fallback: if app doesn't open within 3 seconds, show manual link
+        setTimeout(function() {
+          document.body.innerHTML = '<div class="success">✅ Email Verified Successfully!</div><div class="message">Please open the LocalConnect app to continue.</div><a href="${redirectUrl}" class="button">Open LocalConnect App</a>';
+        }, 3000);
+      </script>
+    </body>
+    </html>
+  `;
+  
+  res.send(html);
 }));
 
 /**

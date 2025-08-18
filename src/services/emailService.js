@@ -179,13 +179,18 @@ class EmailService {
   }
 
   async sendVerificationEmail(email, name, token) {
-    const verificationUrl = `${process.env.FRONTEND_URL}/auth/email-verification?token=${token}`;
+    // For mobile apps, we need to use a deep link that opens the app
+    // The backend will handle verification and redirect to the mobile app
+    const backendUrl = process.env.BACKEND_URL || process.env.API_URL || `http://localhost:${process.env.PORT || 3000}`;
+    const verificationUrl = `${backendUrl}/api/auth/verify-email?token=${token}`;
     const html = verificationTemplate(name, verificationUrl);
     return this.sendEmail(email, 'Verify Your Email Address', html);
   }
 
   async sendPasswordResetEmail(email, name, token) {
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
+    // Use backend URL for password reset instead of frontend URL
+    const backendUrl = process.env.BACKEND_URL || process.env.API_URL || `http://localhost:${process.env.PORT || 3000}`;
+    const resetUrl = `${backendUrl}/api/auth/reset-password?token=${token}`;
     const html = forgotPasswordTemplate(name, resetUrl);
     return this.sendEmail(email, 'Reset Your Password', html);
   }
