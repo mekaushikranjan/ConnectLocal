@@ -18,6 +18,24 @@ import OAuth from 'oauth-1.0a';
 const router = express.Router();
 
 /**
+ * @route   GET /api/auth/test
+ * @desc    Test endpoint to verify API is working
+ * @access  Public
+ */
+router.get('/test', (req, res) => {
+  console.log('🔍 /auth/test endpoint called');
+  console.log('  - Request headers:', Object.keys(req.headers));
+  console.log('  - Authorization header:', req.header('Authorization') ? 'Present' : 'Missing');
+  
+  res.json({
+    success: true,
+    message: 'Auth API is working!',
+    timestamp: new Date().toISOString(),
+    headers: Object.keys(req.headers)
+  });
+});
+
+/**
  * @route   POST /api/auth/register
  * @desc    Register a new user
  * @access  Public
@@ -135,7 +153,7 @@ router.post('/login', asyncHandler(async (req, res) => {
   }
 
   // Check if email is verified - BLOCK LOGIN IF NOT VERIFIED
-  if (!user.emailVerified) {
+  if (!user.email_verified) {
     return res.status(401).json({
       success: false,
       message: 'Please verify your email address before logging in. Check your inbox for the verification link.',
@@ -281,7 +299,7 @@ router.post('/login', asyncHandler(async (req, res) => {
         coverImageUrl: user.coverImageUrl,
         phoneNumber: user.phoneNumber,
         phoneVerified: user.phoneVerified,
-        emailVerified: user.emailVerified,
+        emailVerified: user.email_verified,
         role: user.role,
         status: user.status,
         locationCity: user.locationCity,
@@ -295,7 +313,7 @@ router.post('/login', asyncHandler(async (req, res) => {
       },
       token,
       refreshToken,
-      requiresVerification: !user.emailVerified
+      requiresVerification: !user.email_verified
     }
   });
 }));
@@ -707,10 +725,14 @@ router.post('/logout', authenticate, asyncHandler(async (req, res) => {
 
 /**
  * @route   GET /api/auth/me
- * @desc    Get current user
+ * @desc    Get current user profile
  * @access  Private
  */
 router.get('/me', authenticate, asyncHandler(async (req, res) => {
+  console.log('🔍 /auth/me endpoint called');
+  console.log('  - User ID:', req.user.id);
+  console.log('  - User email:', req.user.email);
+  
   res.json({
     success: true,
     data: {
@@ -1077,7 +1099,7 @@ router.post('/verify-email', asyncHandler(async (req, res) => {
         displayName: user.displayName,
         firstName: user.first_name || '', 
         lastName: user.last_name || '',
-        email_verified: user.email_verified,
+        emailVerified: user.email_verified,
         role: user.role,
         status: user.status,
         createdAt: user.createdAt
