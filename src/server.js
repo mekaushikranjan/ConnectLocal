@@ -178,6 +178,79 @@ app.get('/', (req, res) => {
   });
 });
 
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     summary: Health check
+ *     description: Check the health status of the API and database
+ *     tags: [System]
+ *     responses:
+ *       200:
+ *         description: System is healthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   enum: [OK, ERROR]
+ *                   example: OK
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *                   example: "2023-01-01T00:00:00.000Z"
+ *                 uptime:
+ *                   type: number
+ *                   description: Server uptime in seconds
+ *                   example: 3600
+ *                 environment:
+ *                   type: string
+ *                   example: production
+ *                 responseTime:
+ *                   type: string
+ *                   example: "15ms"
+ *                 database:
+ *                   type: object
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                       enum: [OK, ERROR]
+ *                     dialect:
+ *                       type: string
+ *                       example: postgres
+ *                     host:
+ *                       type: string
+ *                       example: localhost
+ *       500:
+ *         description: System is unhealthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: ERROR
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *                 uptime:
+ *                   type: number
+ *                 environment:
+ *                   type: string
+ *                 responseTime:
+ *                   type: string
+ *                 database:
+ *                   type: object
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                       example: ERROR
+ *                     error:
+ *                       type: string
+ */
 // Health check endpoint
 app.get('/health', async (req, res) => {
   const startTime = Date.now();
@@ -214,6 +287,65 @@ app.get('/health', async (req, res) => {
   res.status(statusCode).json(response);
 });
 
+/**
+ * @swagger
+ * /network-info:
+ *   get:
+ *     summary: Get network information
+ *     description: Get network configuration information for mobile device setup
+ *     tags: [System]
+ *     responses:
+ *       200:
+ *         description: Network information retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     serverIP:
+ *                       type: string
+ *                       description: Local server IP address
+ *                       example: "192.168.1.100"
+ *                     serverPort:
+ *                       type: number
+ *                       description: Server port number
+ *                       example: 5000
+ *                     clientIP:
+ *                       type: string
+ *                       description: Client IP address
+ *                       example: "192.168.1.101"
+ *                     networkInterfaces:
+ *                       type: object
+ *                       description: Available network interfaces
+ *                     apiBaseUrl:
+ *                       type: string
+ *                       description: Base URL for API endpoints
+ *                       example: "http://192.168.1.100:5000/api"
+ *                     healthCheck:
+ *                       type: string
+ *                       description: Health check endpoint URL
+ *                       example: "http://192.168.1.100:5000/health"
+ *                     environment:
+ *                       type: string
+ *                       description: Current environment
+ *                       example: "development"
+ *                     corsEnabled:
+ *                       type: boolean
+ *                       description: Whether CORS is enabled
+ *                       example: true
+ *                     supportedNetworks:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       description: Supported network types
+ *                       example: ["192.168.x.x (Home networks)", "10.x.x.x (Corporate networks)"]
+ */
 // Network information endpoint for mobile device setup
 app.get('/network-info', (req, res) => {
   const localIP = getLocalIP();

@@ -34,9 +34,114 @@ const transformJobForFrontend = (job) => {
 };
 
 /**
- * @route   POST /api/jobs
- * @desc    Create a new job posting
- * @access  Private
+ * @swagger
+ * /api/jobs:
+ *   post:
+ *     summary: Create a new job posting
+ *     description: Create a new job posting in the job board
+ *     tags: [Jobs]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - description
+ *               - company
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 description: Job title
+ *                 example: "Senior Frontend Developer"
+ *               description:
+ *                 type: string
+ *                 description: Detailed job description
+ *                 example: "We are looking for an experienced frontend developer..."
+ *               company:
+ *                 type: string
+ *                 description: Company name
+ *                 example: "Tech Corp"
+ *               location:
+ *                 type: string
+ *                 description: Job location
+ *                 example: "Mumbai, Maharashtra"
+ *               type:
+ *                 type: string
+ *                 enum: [full-time, part-time, contract, freelance, internship, temporary, volunteer]
+ *                 default: "full-time"
+ *                 description: Employment type
+ *                 example: "full-time"
+ *               salary:
+ *                 type: string
+ *                 description: Salary information
+ *                 example: "₹80,000 - ₹100,000 per year"
+ *               requirements:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Job requirements
+ *                 example: ["3+ years experience", "React knowledge", "Team player"]
+ *               skills:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Required skills
+ *                 example: ["JavaScript", "React", "Node.js"]
+ *               experienceLevel:
+ *                 type: string
+ *                 enum: [entry, mid, senior, executive]
+ *                 default: "entry"
+ *                 description: Experience level required
+ *                 example: "senior"
+ *               locationType:
+ *                 type: string
+ *                 enum: [on-site, remote, hybrid]
+ *                 default: "on-site"
+ *                 description: Work location type
+ *                 example: "hybrid"
+ *               contactEmail:
+ *                 type: string
+ *                 format: email
+ *                 description: Contact email for applications
+ *                 example: "hr@techcorp.com"
+ *               applicationDeadline:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Application deadline
+ *                 example: "2023-12-31T23:59:59.000Z"
+ *     responses:
+ *       201:
+ *         description: Job posting created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Job posting created successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     job:
+ *                       $ref: '#/components/schemas/JobPosting'
+ *       400:
+ *         description: Bad request - Invalid data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.post('/', authenticate, asyncHandler(async (req, res) => {
   const {

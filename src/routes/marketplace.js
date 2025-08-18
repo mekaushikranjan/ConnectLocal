@@ -43,9 +43,130 @@ const transformItemForFrontend = (item) => {
 };
 
 /**
- * @route   POST /api/marketplace
- * @desc    Create a new marketplace listing
- * @access  Private
+ * @swagger
+ * /api/marketplace:
+ *   post:
+ *     summary: Create a new marketplace listing
+ *     description: Create a new item listing in the marketplace
+ *     tags: [Marketplace]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - description
+ *               - price
+ *               - category
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 description: Item title
+ *                 example: "iPhone 13 Pro Max"
+ *               description:
+ *                 type: string
+ *                 description: Detailed item description
+ *                 example: "Excellent condition, barely used iPhone 13 Pro Max"
+ *               price:
+ *                 type: number
+ *                 description: Item price
+ *                 example: 45000
+ *               currency:
+ *                 type: string
+ *                 default: "INR"
+ *                 description: Price currency
+ *                 example: "INR"
+ *               negotiable:
+ *                 type: boolean
+ *                 default: true
+ *                 description: Whether price is negotiable
+ *               category:
+ *                 type: string
+ *                 description: Item category
+ *                 example: "electronics"
+ *               condition:
+ *                 type: string
+ *                 enum: [new, like-new, good, fair, poor]
+ *                 default: "good"
+ *                 description: Item condition
+ *                 example: "good"
+ *               location:
+ *                 type: object
+ *                 properties:
+ *                   city:
+ *                     type: string
+ *                   state:
+ *                     type: string
+ *                   country:
+ *                     type: string
+ *                   formattedAddress:
+ *                     type: string
+ *                 description: Item location
+ *                 example:
+ *                   city: "Mumbai"
+ *                   state: "Maharashtra"
+ *                   formattedAddress: "Mumbai, Maharashtra"
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     url:
+ *                       type: string
+ *                       format: uri
+ *                     alt:
+ *                       type: string
+ *                 description: Item images
+ *                 example: []
+ *               specifications:
+ *                 type: object
+ *                 additionalProperties: true
+ *                 description: Item specifications
+ *                 example:
+ *                   Storage: "256GB"
+ *                   Color: "Sierra Blue"
+ *                   Battery Health: "95%"
+ *               shipping:
+ *                 type: object
+ *                 properties:
+ *                   available:
+ *                     type: boolean
+ *                   cost:
+ *                     type: number
+ *                 description: Shipping information
+ *     responses:
+ *       201:
+ *         description: Item created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Item listed successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     item:
+ *                       $ref: '#/components/schemas/MarketplaceItem'
+ *       400:
+ *         description: Bad request - Invalid data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.post('/', authenticate, asyncHandler(async (req, res) => {
   const {

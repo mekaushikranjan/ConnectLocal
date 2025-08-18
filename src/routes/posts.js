@@ -9,9 +9,51 @@ import ScheduledPostsService from '../services/scheduledPostsService.js';
 const router = express.Router();
 
 /**
- * @route   GET /api/posts
- * @desc    Get feed posts
- * @access  Private
+ * @swagger
+ * /api/posts:
+ *   get:
+ *     summary: Get feed posts
+ *     description: Retrieve paginated posts for the user's feed with optional filtering
+ *     tags: [Posts]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/pageParam'
+ *       - $ref: '#/components/parameters/limitParam'
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [general, urgent, event, announcement, lost_found, help]
+ *         description: Filter posts by type
+ *         example: event
+ *       - in: query
+ *         name: location
+ *         schema:
+ *           type: string
+ *         description: Filter posts by location
+ *         example: Mumbai
+ *     responses:
+ *       200:
+ *         description: Posts retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/PaginatedResponse'
+ *             example:
+ *               success: true
+ *               data:
+ *                 items:
+ *                   - $ref: '#/components/schemas/Post'
+ *                 total: 25
+ *                 page: 1
+ *                 totalPages: 3
+ *                 hasNext: true
+ *                 hasPrev: false
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.get('/', authenticate, asyncHandler(async (req, res) => {
   const { type, location, limit = 10, page = 1 } = req.query;
@@ -53,9 +95,138 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * @route   POST /api/posts
- * @desc    Create a new post
- * @access  Private
+ * @swagger
+ * /api/posts:
+ *   post:
+ *     summary: Create a new post
+ *     description: Create a new community post with optional media and location
+ *     tags: [Posts]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - content
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 description: Post title (optional)
+ *                 example: "Community Event This Weekend"
+ *               content:
+ *                 type: string
+ *                 description: Post content
+ *                 example: "Join us for a community gathering this Saturday at the park!"
+ *               type:
+ *                 type: string
+ *                 enum: [general, urgent, event, announcement, lost_found, help]
+ *                 default: general
+ *                 description: Type of post
+ *                 example: event
+ *               category:
+ *                 type: string
+ *                 enum: [community, business, safety, entertainment, education]
+ *                 default: community
+ *                 description: Post category
+ *                 example: community
+ *               visibility:
+ *                 type: string
+ *                 enum: [public, friends, private]
+ *                 default: public
+ *                 description: Post visibility
+ *                 example: public
+ *               media:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     url:
+ *                       type: string
+ *                       format: uri
+ *                     type:
+ *                       type: string
+ *                       enum: [image, video, document]
+ *                     filename:
+ *                       type: string
+ *                 description: Media attachments
+ *                 example: []
+ *               location:
+ *                 type: object
+ *                 properties:
+ *                   city:
+ *                     type: string
+ *                   state:
+ *                     type: string
+ *                   country:
+ *                     type: string
+ *                   formattedAddress:
+ *                     type: string
+ *                   coordinates:
+ *                     type: object
+ *                     properties:
+ *                       latitude:
+ *                         type: number
+ *                       longitude:
+ *                         type: number
+ *                 description: Location information
+ *               tags:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Post tags
+ *                 example: ["event", "community", "weekend"]
+ *               isAnonymous:
+ *                 type: boolean
+ *                 default: false
+ *                 description: Whether to post anonymously
+ *               commentsEnabled:
+ *                 type: boolean
+ *                 default: true
+ *                 description: Whether comments are enabled
+ *               urgencyLevel:
+ *                 type: string
+ *                 enum: [low, medium, high, critical]
+ *                 default: medium
+ *                 description: Urgency level for urgent posts
+ *               scheduledFor:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Schedule post for future publication
+ *     responses:
+ *       201:
+ *         description: Post created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Post created successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     post:
+ *                       $ref: '#/components/schemas/Post'
+ *       400:
+ *         description: Bad request - Invalid data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *             example:
+ *               success: false
+ *               message: Post content is required
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.post('/', authenticate, asyncHandler(async (req, res) => {
   const { 

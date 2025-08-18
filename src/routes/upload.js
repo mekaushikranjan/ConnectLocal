@@ -59,9 +59,104 @@ const generateFilename = (originalname) => {
 };
 
 /**
- * @route   POST /api/upload/image
- * @desc    Upload an image
- * @access  Private
+ * @swagger
+ * /api/upload/image:
+ *   post:
+ *     summary: Upload an image
+ *     description: Upload and process an image file with optional resizing and optimization
+ *     tags: [Upload]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - image
+ *             properties:
+ *               image:
+ *                 type: string
+ *                 format: binary
+ *                 description: Image file to upload
+ *               type:
+ *                 type: string
+ *                 enum: [general, avatar, post, marketplace]
+ *                 default: general
+ *                 description: Type of image upload
+ *                 example: avatar
+ *               width:
+ *                 type: integer
+ *                 description: Target width for resizing (optional)
+ *                 example: 800
+ *               height:
+ *                 type: integer
+ *                 description: Target height for resizing (optional)
+ *                 example: 600
+ *               quality:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 100
+ *                 default: 80
+ *                 description: Image quality (1-100)
+ *                 example: 85
+ *     responses:
+ *       200:
+ *         description: Image uploaded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Image uploaded successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     url:
+ *                       type: string
+ *                       format: uri
+ *                       description: Public URL of uploaded image
+ *                       example: "https://cdn.localconnect.com/uploads/avatars/1234567890-abc123.webp"
+ *                     filename:
+ *                       type: string
+ *                       description: Generated filename
+ *                       example: "1234567890-abc123.webp"
+ *                     size:
+ *                       type: number
+ *                       description: File size in bytes
+ *                       example: 245760
+ *                     type:
+ *                       type: string
+ *                       description: Upload type
+ *                       example: "avatar"
+ *       400:
+ *         description: Bad request - Invalid file or parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *             example:
+ *               success: false
+ *               message: No image file provided
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       413:
+ *         description: File too large
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *             example:
+ *               success: false
+ *               message: File too large. Maximum size is 10MB
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.post('/image', authenticate, upload.single('image'), asyncHandler(async (req, res) => {
   if (!req.file) {

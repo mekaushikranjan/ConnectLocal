@@ -18,9 +18,34 @@ import OAuth from 'oauth-1.0a';
 const router = express.Router();
 
 /**
- * @route   GET /api/auth/test
- * @desc    Test endpoint to verify API is working
- * @access  Public
+ * @swagger
+ * /api/auth/test:
+ *   get:
+ *     summary: Test authentication API
+ *     description: Test endpoint to verify the authentication API is working properly
+ *     tags: [Authentication]
+ *     responses:
+ *       200:
+ *         description: API is working
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Auth API is working!
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *                 headers:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                   example: ["content-type", "user-agent", "accept"]
  */
 router.get('/test', (req, res) => {
   res.json({
@@ -32,9 +57,79 @@ router.get('/test', (req, res) => {
 });
 
 /**
- * @route   POST /api/auth/register
- * @desc    Register a new user
- * @access  Public
+ * @swagger
+ * /api/auth/register:
+ *   post:
+ *     summary: Register a new user
+ *     description: Create a new user account with email verification
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: john.doe@example.com
+ *               password:
+ *                 type: string
+ *                 minLength: 6
+ *                 description: User's password (minimum 6 characters)
+ *                 example: "password123"
+ *               displayName:
+ *                 type: string
+ *                 description: User's display name
+ *                 example: "John Doe"
+ *               firstName:
+ *                 type: string
+ *                 description: User's first name
+ *                 example: "John"
+ *               lastName:
+ *                 type: string
+ *                 description: User's last name
+ *                 example: "Doe"
+ *               phoneNumber:
+ *                 type: string
+ *                 description: User's phone number
+ *                 example: "+1234567890"
+ *     responses:
+ *       201:
+ *         description: User registered successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: User registered successfully. Please check your email for verification.
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       $ref: '#/components/schemas/User'
+ *       400:
+ *         description: Bad request - User already exists or invalid data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *             example:
+ *               success: false
+ *               message: User already exists with this email
+ *               code: VALIDATION_ERROR
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.post('/register', asyncHandler(async (req, res) => {
   const { email, password, displayName, firstName, lastName, phoneNumber } = req.body;
@@ -127,9 +222,97 @@ router.post('/register', asyncHandler(async (req, res) => {
 }));
 
 /**
- * @route   POST /api/auth/login
- * @desc    Login user
- * @access  Public
+ * @swagger
+ * /api/auth/login:
+ *   post:
+ *     summary: Login user
+ *     description: Authenticate user with email and password, return JWT token
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: john.doe@example.com
+ *               password:
+ *                 type: string
+ *                 description: User's password
+ *                 example: "password123"
+ *               deviceInfo:
+ *                 type: object
+ *                 description: Device information for push notifications
+ *                 properties:
+ *                   deviceId:
+ *                     type: string
+ *                     example: "device_123"
+ *                   deviceType:
+ *                     type: string
+ *                     enum: [ios, android, web]
+ *                     example: "ios"
+ *                   fcmToken:
+ *                     type: string
+ *                     description: Firebase Cloud Messaging token
+ *                     example: "fcm_token_123"
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Login successful
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     token:
+ *                       type: string
+ *                       description: JWT authentication token
+ *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *                     user:
+ *                       $ref: '#/components/schemas/User'
+ *                     expiresIn:
+ *                       type: string
+ *                       example: "7d"
+ *       401:
+ *         description: Authentication failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *             examples:
+ *               invalidCredentials:
+ *                 summary: Invalid credentials
+ *                 value:
+ *                   success: false
+ *                   message: Invalid credentials
+ *               emailNotVerified:
+ *                 summary: Email not verified
+ *                 value:
+ *                   success: false
+ *                   message: Please verify your email address before logging in
+ *                   requiresVerification: true
+ *               accountSuspended:
+ *                 summary: Account suspended
+ *                 value:
+ *                   success: false
+ *                   message: Account is suspended. Please contact support.
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.post('/login', asyncHandler(async (req, res) => {
   const { email, password, deviceInfo } = req.body;
