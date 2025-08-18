@@ -166,6 +166,9 @@ app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Serve static files
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
 
 
 // Client connection logging for mobile device debugging
@@ -388,14 +391,12 @@ const setupSwaggerRoutes = async () => {
     const { default: swaggerUi } = await import('swagger-ui-express');
     const { default: swaggerSpec } = await import('./config/swagger.js');
 
-    console.log('Swagger modules imported successfully');
-
-    // Serve Swagger UI with enhanced features
+    // Serve Swagger UI with enhanced frontend-like styling
     app.use(['/api-docs', '/docs'], swaggerUi.serve);
     app.get(['/api-docs', '/docs'], swaggerUi.setup(swaggerSpec, {
       customCss: swaggerSpec.customCss,
-      customSiteTitle: process.env.SWAGGER_TITLE || 'LocalConnect API Documentation',
-      customJs: '/swagger-enhancements.js',
+      customSiteTitle: 'LocalConnect API - Modern Documentation',
+      customfavIcon: '/favicon.ico',
       swaggerOptions: {
         persistAuthorization: true,
         docExpansion: 'list',
@@ -409,14 +410,12 @@ const setupSwaggerRoutes = async () => {
         displayOperationId: false,
         supportedSubmitMethods: ['get', 'post', 'put', 'delete', 'patch'],
         validatorUrl: null,
+        deepLinking: true,
+        layout: 'BaseLayout',
+        showExtensions: true,
+        showCommonExtensions: true,
       }
     }));
-
-    // Serve custom JavaScript enhancements
-    app.get('/swagger-enhancements.js', (req, res) => {
-      res.setHeader('Content-Type', 'application/javascript');
-      res.sendFile(path.join(__dirname, 'config', 'swagger-enhancements.js'));
-    });
 
     // Serve Swagger JSON
     app.get('/api-docs.json', (req, res) => {
@@ -424,18 +423,18 @@ const setupSwaggerRoutes = async () => {
       res.send(swaggerSpec);
     });
 
-    console.log('Swagger documentation setup completed successfully');
-    console.log('Swagger UI available at: /api-docs and /docs');
-    console.log('Swagger JSON available at: /api-docs.json');
+    // Serve enhanced API documentation HTML
+    app.get('/api-docs-enhanced', (req, res) => {
+      res.sendFile(path.join(__dirname, '..', 'public', 'api-docs.html'));
+    });
+
   } catch (error) {
-    console.error('Error setting up Swagger documentation:', error);
     throw error;
   }
 };
 
 // Initialize Swagger docs
 await setupSwaggerRoutes().catch(err => {
-  console.error('Failed to initialize Swagger documentation:', err.message);
 });
 
 // API routes
