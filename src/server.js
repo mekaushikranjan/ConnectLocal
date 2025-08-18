@@ -375,11 +375,7 @@ app.get('/network-info', (req, res) => {
 
 // API documentation setup
 const setupSwaggerRoutes = async () => {
-  // Only enable Swagger in development or if explicitly enabled in production
-  if (process.env.NODE_ENV === 'production' && process.env.ENABLE_SWAGGER !== 'true') {
-    return;
-  }
-
+  // Enable Swagger in all environments for better API documentation access
   const { default: swaggerUi } = await import('swagger-ui-express');
   const { default: swaggerSpec } = await import('./config/swagger.js');
 
@@ -403,7 +399,7 @@ const setupSwaggerRoutes = async () => {
 
 // Initialize Swagger docs
 await setupSwaggerRoutes().catch(err => {
-  // Failed to initialize Swagger documentation
+  console.error('Failed to initialize Swagger documentation:', err.message);
 });
 
 // API routes
