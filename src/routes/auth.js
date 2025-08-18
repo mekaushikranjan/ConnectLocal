@@ -1188,7 +1188,7 @@ router.get('/verify-email', asyncHandler(async (req, res) => {
 
 /**
  * @route   POST /api/auth/resend-verification
- * @desc    Resend verification email
+ * @desc    Resend verification email (authenticated version)
  * @access  Private
  */
 router.post('/resend-verification', authenticate, asyncHandler(async (req, res) => {
@@ -1211,6 +1211,67 @@ router.post('/resend-verification', authenticate, asyncHandler(async (req, res) 
   // Send verification email
   try {
     await emailService.sendVerificationEmail(req.user.email, req.user.displayName, verificationToken);
+    
+    res.json({
+      success: true,
+      message: 'Verification email sent successfully'
+    });
+  } catch (error) {
+    logger.error('Failed to send verification email:', error);
+    
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to send verification email. Please try again.'
+    });
+  }
+}));
+
+/**
+ * @route   POST /api/auth/resend-verification-public
+ * @desc    Resend verification email (public version - no auth required)
+ * @access  Public
+ */
+router.post('/resend-verification-public', asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      message: 'Email is required'
+    });
+  }
+
+  // Find user by email
+  const user = await User.findOne({ 
+    where: { email: email.toLowerCase() }
+  });
+
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: 'User not found with this email address'
+    });
+  }
+
+  if (user.email_verified) {
+    return res.status(400).json({
+      success: false,
+      message: 'Email is already verified'
+    });
+  }
+
+  // Generate new verification token
+  const verificationToken = crypto.randomBytes(32).toString('hex');
+  const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+  await user.update({
+    email_verification_token: verificationToken,
+    email_verification_expires: verificationExpires
+  });
+
+  // Send verification email
+  try {
+    await emailService.sendVerificationEmail(user.email, user.displayName, verificationToken);
     
     res.json({
       success: true,

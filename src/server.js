@@ -124,11 +124,16 @@ app.use(cors(corsOptions));
 // Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 200, // limit each IP to 200 requests per windowMs (increased from 100)
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.path === '/health', // Skip rate limiting for health checks
+  skip: (req) => {
+    // Skip rate limiting for health checks and certain endpoints
+    return req.path === '/health' || 
+           req.path === '/api/auth/resend-verification-public' ||
+           req.path === '/api/auth/verify-email';
+  }
 });
 
 // Apply rate limiting to API routes
@@ -137,10 +142,16 @@ app.use('/api/', limiter);
 // Stricter rate limiting for auth routes
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 requests per windowMs
+  max: 20, // limit each IP to 20 requests per windowMs (increased from 5)
   message: 'Too many authentication attempts, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting for certain auth endpoints that might be called frequently
+    return req.path === '/health' || 
+           req.path === '/resend-verification' || 
+           req.path === '/verify-email';
+  }
 });
 app.use('/api/auth/', authLimiter);
 
