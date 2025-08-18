@@ -244,26 +244,7 @@ router.put('/profile', authenticate, asyncHandler(async (req, res) => {
     socialLinks
   } = req.body;
 
-  console.log('Profile update request:', {
-    displayName,
-    firstName,
-    lastName,
-    bio,
-    phoneNumber,
-    locationCity,
-    locationState,
-    locationCountry,
-    locationDistrict,
-    occupation,
-    company,
-    education,
-    gender,
-    dateOfBirth,
-    relationshipStatus,
-    interests,
-    skills,
-    socialLinks
-  });
+ 
 
   const user = await User.findByPk(req.user.id);
   
@@ -279,19 +260,17 @@ router.put('/profile', authenticate, asyncHandler(async (req, res) => {
   // Only update location fields if they are provided and different from current values
   if (locationCity !== undefined && locationCity !== '' && locationCity !== user.location_city) {
     updateData.location_city = locationCity;
-    console.log('Location city updated:', user.location_city, '->', locationCity);
+    // Location city updated
   }
   if (locationState !== undefined && locationState !== '' && locationState !== user.location_state) {
     updateData.location_state = locationState;
-    console.log('Location state updated:', user.location_state, '->', locationState);
+    // Location state updated
   }
   if (locationCountry !== undefined && locationCountry !== '' && locationCountry !== user.location_country) {
     updateData.location_country = locationCountry;
-    console.log('Location country updated:', user.location_country, '->', locationCountry);
   }
   if (locationDistrict !== undefined && locationDistrict !== '' && locationDistrict !== user.location_district) {
     updateData.location_district = locationDistrict;
-    console.log('Location district updated:', user.location_district, '->', locationDistrict);
   }
   
   if (occupation !== undefined && occupation !== '') updateData.occupation = occupation;
@@ -304,9 +283,8 @@ router.put('/profile', authenticate, asyncHandler(async (req, res) => {
     
     if (validGenders.includes(normalizedGender)) {
       updateData.gender_type = normalizedGender;
-      console.log('Gender updated:', user.gender_type, '->', normalizedGender);
     } else {
-      console.log('Invalid gender value:', gender, 'Skipping gender update');
+      // Invalid gender value
     }
   }
   if (dateOfBirth !== undefined && dateOfBirth !== '') updateData.date_of_birth = dateOfBirth;
@@ -315,7 +293,7 @@ router.put('/profile', authenticate, asyncHandler(async (req, res) => {
   if (skills !== undefined) updateData.skills_array = skills;
   if (socialLinks !== undefined) updateData.social_links = socialLinks;
 
-  console.log('Update data to be applied:', updateData);
+
 
   await user.update(updateData);
 

@@ -4,7 +4,7 @@ import { verificationTemplate } from './templates/verification.js';
 import { forgotPasswordTemplate } from './templates/forgotPassword.js';
 import { passwordUpdatedTemplate } from './templates/passwordUpdated.js';
 import { otpTemplate } from './templates/otp.js';
-import logger from '../utils/logger.js';
+
 
 class EmailService {
   constructor() {
@@ -43,7 +43,6 @@ class EmailService {
 
         // Verify connection configuration
         this.verifyConnection();
-        logger.info('EmailService initialized in production mode with SMTP');
       } else if (process.env.EMAIL_SERVICE === 'gmail' && process.env.GMAIL_APP_PASSWORD) {
         // Gmail OAuth2 setup
         this.transporter = nodemailer.createTransport({
@@ -53,7 +52,6 @@ class EmailService {
             pass: process.env.GMAIL_APP_PASSWORD
           }
         });
-        logger.info('EmailService initialized with Gmail OAuth2');
       } else if (process.env.EMAIL_SERVICE === 'sendgrid' && process.env.SENDGRID_API_KEY) {
         // SendGrid setup
         this.transporter = nodemailer.createTransport({
@@ -65,7 +63,6 @@ class EmailService {
             pass: process.env.SENDGRID_API_KEY
           }
         });
-        logger.info('EmailService initialized with SendGrid');
       } else if (process.env.EMAIL_SERVICE === 'mailgun' && process.env.MAILGUN_API_KEY) {
         // Mailgun setup
         this.transporter = nodemailer.createTransport({
@@ -77,7 +74,6 @@ class EmailService {
             pass: process.env.MAILGUN_API_KEY
           }
         });
-        logger.info('EmailService initialized with Mailgun');
       } else {
         // Development/Test mode: Use stream transport
         this.transporter = nodemailer.createTransport({
@@ -85,38 +81,33 @@ class EmailService {
           buffer: true,
           newline: 'unix'
         });
-        logger.warn('EmailService running in dev/test mode: emails are not sent (using streamTransport).');
-        logger.info('To enable production emails, set EMAIL_HOST, EMAIL_USER, EMAIL_PASS or use EMAIL_SERVICE=gmail/sendgrid/mailgun');
       }
     } catch (error) {
-      logger.error('Error initializing email transporter:', error);
       // Fallback to stream transport
       this.transporter = nodemailer.createTransport({
         streamTransport: true,
         buffer: true,
         newline: 'unix'
       });
-      logger.warn('EmailService fallback to stream transport due to initialization error');
     }
   }
 
   async verifyConnection() {
     try {
       await this.transporter.verify();
-      logger.info('Email transporter connection verified successfully');
     } catch (error) {
-      logger.error('Email transporter connection verification failed:', error);
       throw new Error('Email service configuration is invalid');
     }
   }
 
-  async sendEmailWithRetry(to, subject, html, retryCount = 0) {
+  async sendEmailWithRetry(to, subject, html, attachments = [], retryCount = 0) {
     try {
       const mailOptions = {
         from: this.getFromAddress(),
         to,
         subject,
         html,
+        attachments,
         // Additional headers for better deliverability
         headers: {
           'X-Priority': '3',
@@ -126,22 +117,12 @@ class EmailService {
       };
 
       const info = await this.transporter.sendMail(mailOptions);
-      
-      logger.info(`Email sent successfully: ${info.messageId} to ${to}`);
-      
-      // Log preview in development
-      if (process.env.NODE_ENV !== 'production') {
-        const preview = typeof info.message === 'string' ? info.message.slice(0, 500) : '[streamTransport output]';
-        logger.info(`Email preview (dev): to=${to}, subject="${subject}"`);
-        logger.debug(preview);
-      }
+        
+      return info;
       
       return info;
     } catch (error) {
-      logger.error(`Email send attempt ${retryCount + 1} failed:`, error);
-      
       if (retryCount < this.maxRetries && this.isRetryableError(error)) {
-        logger.info(`Retrying email send in ${this.retryDelay}ms...`);
         await this.delay(this.retryDelay);
         return this.sendEmailWithRetry(to, subject, html, retryCount + 1);
       }
@@ -169,13 +150,20 @@ class EmailService {
     return `${fromName} <${fromAddress}>`;
   }
 
-  async sendEmail(to, subject, html) {
-    return this.sendEmailWithRetry(to, subject, html);
+  async sendEmail(to, subject, html, attachments = []) {
+    return this.sendEmailWithRetry(to, subject, html, attachments);
   }
 
   async sendWelcomeEmail(email, name) {
     const html = welcomeTemplate(name);
-    return this.sendEmail(email, 'Welcome to LocalConnect! 🎉', html);
+    const attachments = [
+      {
+        filename: 'icon.png',
+        path: './assets/icon.png',
+        cid: 'icon.png'
+      }
+    ];
+    return this.sendEmail(email, 'Welcome to LocalConnect! 🎉', html, attachments);
   }
 
   async sendVerificationEmail(email, name, token) {
@@ -184,7 +172,14 @@ class EmailService {
     const backendUrl = process.env.BACKEND_URL || process.env.API_URL || `http://localhost:${process.env.PORT || 3000}`;
     const verificationUrl = `${backendUrl}/api/auth/verify-email?token=${token}`;
     const html = verificationTemplate(name, verificationUrl);
-    return this.sendEmail(email, 'Verify Your Email Address', html);
+    const attachments = [
+      {
+        filename: 'icon.png',
+        path: './assets/icon.png',
+        cid: 'icon.png'
+      }
+    ];
+    return this.sendEmail(email, 'Verify Your Email Address', html, attachments);
   }
 
   async sendPasswordResetEmail(email, name, token) {

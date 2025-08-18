@@ -3,7 +3,7 @@ import { sequelize } from './config/database.js';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
-import morgan from 'morgan';
+
 import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import 'express-async-errors';
@@ -160,13 +160,7 @@ app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Logging
-if (process.env.NODE_ENV !== 'test') {
-  const morganFormat = process.env.NODE_ENV === 'production' ? 'combined' : 'dev';
-  app.use(morgan(morganFormat, { 
-    skip: (req) => req.path === '/health' // Skip logging health checks in production
-  }));
-}
+
 
 // Client connection logging for mobile device debugging
 app.use((req, res, next) => {
@@ -215,14 +209,7 @@ app.get('/health', async (req, res) => {
     }
   };
 
-  // Console logging for health checks
-  const logMessage = `[HEALTH CHECK] ${new Date().toISOString()} - Status: ${response.status} | DB: ${dbStatus} | Response Time: ${responseTime}ms | Client IP: ${req.ip || req.connection.remoteAddress}`;
-  
-  if (dbStatus === 'OK') {
-    console.log(`✅ ${logMessage}`);
-  } else {
-    console.error(`❌ ${logMessage} | Error: ${errorMessage}`);
-  }
+
 
   res.status(statusCode).json(response);
 });
@@ -323,14 +310,13 @@ app.use(errorHandler);
 const initializeDatabase = async () => {
   try {
     await sequelize.authenticate();
-    console.log('Database connection established successfully.');
+
     
     // Database sync configuration
     const forceSync = process.env.NODE_ENV === 'development' && process.env.FORCE_SYNC === 'true';
     const alterSync = process.env.NODE_ENV === 'development' || process.env.ALTER_SYNC === 'true';
     
     if (process.env.NODE_ENV === 'production' && forceSync) {
-      console.error('Force sync is not allowed in production!');
       process.exit(1);
     }
     
@@ -341,28 +327,16 @@ const initializeDatabase = async () => {
       ? { force: true } // Force sync in development to fix schema issues
       : { alter: alterSync && !forceSync }; // Use alter in production
     
-    console.log(`Database sync mode: ${isDevelopment ? 'force' : 'alter'} (NODE_ENV: ${process.env.NODE_ENV || 'not set'})`);
-    
     // Database sync mode
     await sequelize.sync(syncOptions);
-    
-    console.log('Database synchronized successfully.');
     
     // Initialize cron service after database is ready
     if (process.env.ENABLE_SCHEDULED_POSTS === 'true' || process.env.NODE_ENV === 'development') {
       cronService.init();
-      console.log('Cron service initialized.');
-    } else {
-      console.log('Cron service disabled.');
     }
     
     return true;
   } catch (error) {
-    console.error('Database initialization failed:', error.message);
-    console.error('Please check your database configuration and ensure the database is running.');
-    console.error('Environment variables needed:');
-    console.error('- DATABASE_URL (production)');
-    console.error('- DB_HOST, DB_USER, DB_PASSWORD, DB_NAME (development)');
     return false;
   }
 };
@@ -397,7 +371,6 @@ const startServer = async () => {
     const dbInitialized = await initializeDatabase();
     
     if (!dbInitialized) {
-      console.error('Failed to initialize database. Server will not start.');
       process.exit(1);
     }
     
@@ -407,25 +380,16 @@ const startServer = async () => {
          ? `https://${process.env.FRONTEND_URL?.replace('https://', '').replace('http://', '') || 'localhost'}:${PORT}`
          : `http://localhost:${PORT}`;
          
-       console.log(`🚀 Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
-       console.log(`🌐 Server bound to 0.0.0.0:${PORT}`);
-       console.log(`🔗 Health check available at: http://0.0.0.0:${PORT}/health`);
-       
-       if (process.env.NODE_ENV === 'development') {
-         // Log comprehensive network information for mobile device connectivity
-         logNetworkInfo(PORT);
-         
-         const localIP = getLocalIP();
-         const networkUrl = `http://${localIP}:${PORT}`;
-         
-        
-       } else {
-         console.log(`📊 Production server ready for connections`);
-       }
+                if (process.env.NODE_ENV === 'development') {
+           // Log comprehensive network information for mobile device connectivity
+           logNetworkInfo(PORT);
+           
+           const localIP = getLocalIP();
+           const networkUrl = `http://${localIP}:${PORT}`;
+         }
      });
     
   } catch (error) {
-    console.error('Failed to start server:', error);
     process.exit(1);
   }
 };
@@ -433,35 +397,6 @@ const startServer = async () => {
 // Start the server
 startServer();
 
-// Auto health check after server starts
-const runAutoHealthCheck = async () => {
-  try {
-    const startTime = Date.now();
-    let dbStatus = 'ERROR';
-    let errorMessage = null;
 
-    try {
-      // Test database connection
-      await sequelize.authenticate();
-      dbStatus = 'OK';
-    } catch (error) {
-      errorMessage = error.message;
-    }
-
-    const responseTime = Date.now() - startTime;
-    const logMessage = `[AUTO HEALTH CHECK] ${new Date().toISOString()} - Status: ${dbStatus === 'OK' ? 'OK' : 'ERROR'} | DB: ${dbStatus} | Response Time: ${responseTime}ms | Server Startup`;
-    
-    if (dbStatus === 'OK') {
-      console.log(`✅ ${logMessage}`);
-    } else {
-      console.error(`❌ ${logMessage} | Error: ${errorMessage}`);
-    }
-  } catch (error) {
-    console.error(`❌ [AUTO HEALTH CHECK] Failed to run health check: ${error.message}`);
-  }
-};
-
-// Run health check 5 seconds after server starts
-setTimeout(runAutoHealthCheck, 5000);
 
 export { app, server, io };

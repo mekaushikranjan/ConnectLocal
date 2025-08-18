@@ -519,7 +519,7 @@ export default (sequelize) => {
           };
         }
       } catch (error) {
-        console.error('Error capturing content snapshot:', error);
+        // Error capturing content snapshot
       }
     }
   },
@@ -545,7 +545,7 @@ export default (sequelize) => {
               };
             }
           } catch (error) {
-            console.error('Error capturing content snapshot:', error);
+            // Error capturing content snapshot
           }
         }
       }

@@ -400,7 +400,7 @@ export default (sequelize, DataTypes) => {
           application.matchingScore = await job.calculateMatchingScore(applicant.profile);
         }
       } catch (error) {
-        console.error('Error calculating matching score:', error);
+        // Error calculating matching score
       }
     }
   });
@@ -411,7 +411,7 @@ export default (sequelize, DataTypes) => {
         where: { id: application.jobId }
       });
     } catch (error) {
-      console.error('Error updating job applications count:', error);
+      // Error updating job applications count  
     }
   });
 

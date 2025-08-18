@@ -1,6 +1,6 @@
 import { DataTypes } from 'sequelize';
 import { sequelize } from '../config/database.js';
-import logger from '../utils/logger.js';
+
 
 // Import all models in dependency order
 

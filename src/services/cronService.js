@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import ScheduledPostsService from './scheduledPostsService.js';
-import logger from '../utils/logger.js';
+
 
 class CronService {
   constructor() {
@@ -12,7 +12,6 @@ class CronService {
    */
   init() {
     this.startScheduledPostsJob();
-    logger.info('Cron service initialized');
   }
 
   /**
@@ -22,10 +21,9 @@ class CronService {
   startScheduledPostsJob() {
     const job = cron.schedule('* * * * *', async () => {
       try {
-        logger.debug('Running scheduled posts check...');
         await ScheduledPostsService.publishScheduledPosts();
       } catch (error) {
-        logger.error('Error in scheduled posts cron job:', error);
+        // Error in scheduled posts cron job
       }
     }, {
       scheduled: true,
@@ -33,7 +31,6 @@ class CronService {
     });
 
     this.jobs.set('scheduledPosts', job);
-    logger.info('Scheduled posts cron job started');
   }
 
   /**
@@ -42,7 +39,6 @@ class CronService {
   stop() {
     this.jobs.forEach((job, name) => {
       job.stop();
-      logger.info(`Stopped cron job: ${name}`);
     });
     this.jobs.clear();
   }
@@ -55,7 +51,6 @@ class CronService {
     if (job) {
       job.stop();
       this.jobs.delete(jobName);
-      logger.info(`Stopped cron job: ${jobName}`);
     }
   }
 

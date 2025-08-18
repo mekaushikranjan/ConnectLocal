@@ -1,5 +1,5 @@
 import twilio from 'twilio';
-import logger from '../utils/logger.js';
+
 
 class SMSService {
   constructor() {
@@ -14,15 +14,12 @@ class SMSService {
       const authToken = process.env.TWILIO_AUTH_TOKEN;
 
       if (!accountSid || !authToken || !this.fromNumber) {
-        logger.warn('Twilio credentials not configured. SMS service will be disabled.');
         this.client = null;
         return;
       }
 
       this.client = twilio(accountSid, authToken);
-      logger.info('SMS service initialized with Twilio');
     } catch (error) {
-      logger.error('Failed to initialize SMS service:', error);
       this.client = null;
     }
   }
@@ -44,10 +41,8 @@ class SMSService {
         to: phoneNumber
       });
 
-      logger.info(`SMS OTP sent to ${phoneNumber}, SID: ${result.sid}`);
       return result;
     } catch (error) {
-      logger.error(`Failed to send SMS OTP to ${phoneNumber}:`, error);
       throw new Error(`Failed to send SMS: ${error.message}`);
     }
   }
@@ -69,10 +64,8 @@ class SMSService {
         to: phoneNumber
       });
 
-      logger.info(`Phone verification SMS sent to ${phoneNumber}, SID: ${result.sid}`);
       return result;
     } catch (error) {
-      logger.error(`Failed to send phone verification SMS to ${phoneNumber}:`, error);
       throw new Error(`Failed to send verification SMS: ${error.message}`);
     }
   }
@@ -94,10 +87,8 @@ class SMSService {
         to: phoneNumber
       });
 
-      logger.info(`Password reset SMS sent to ${phoneNumber}, SID: ${result.sid}`);
       return result;
     } catch (error) {
-      logger.error(`Failed to send password reset SMS to ${phoneNumber}:`, error);
       throw new Error(`Failed to send reset SMS: ${error.message}`);
     }
   }
@@ -119,10 +110,8 @@ class SMSService {
         to: phoneNumber
       });
 
-      logger.info(`2FA SMS sent to ${phoneNumber}, SID: ${result.sid}`);
       return result;
     } catch (error) {
-      logger.error(`Failed to send 2FA SMS to ${phoneNumber}:`, error);
       throw new Error(`Failed to send 2FA SMS: ${error.message}`);
     }
   }
@@ -144,10 +133,8 @@ class SMSService {
         to: phoneNumber
       });
 
-      logger.info(`Security alert SMS sent to ${phoneNumber}, SID: ${result.sid}`);
       return result;
     } catch (error) {
-      logger.error(`Failed to send security alert SMS to ${phoneNumber}:`, error);
       throw new Error(`Failed to send security alert: ${error.message}`);
     }
   }

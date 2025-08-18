@@ -14,7 +14,7 @@ import {
   LoginHistory 
 } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
-import logger from '../utils/logger.js';
+
 
 const router = express.Router();
 
@@ -28,7 +28,6 @@ const checkUserExists = async (req, res, next) => {
     req.currentUser = user;
     next();
   } catch (error) {
-    logger.error('Error checking user existence:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
@@ -54,7 +53,6 @@ router.get('/privacy-settings', authenticate, checkUserExists, async (req, res) 
       data: privacySettings
     });
   } catch (error) {
-    logger.error('Error getting privacy settings:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -103,7 +101,6 @@ router.put('/privacy-settings', [
       data: privacySettings
     });
   } catch (error) {
-    logger.error('Error updating privacy settings:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -138,7 +135,6 @@ router.get('/2fa/settings', authenticate, checkUserExists, async (req, res) => {
       data: response
     });
   } catch (error) {
-    logger.error('Error getting 2FA settings:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -201,7 +197,7 @@ router.post('/2fa/setup', [
       data: response
     });
   } catch (error) {
-    logger.error('Error setting up 2FA:', error);
+    // Error setting up 2FA
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -269,7 +265,7 @@ router.post('/2fa/verify', [
       data: { backupCodes }
     });
   } catch (error) {
-    logger.error('Error verifying 2FA:', error);
+    // Error verifying 2FA
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -334,7 +330,7 @@ router.post('/2fa/disable', [
       message: '2FA disabled successfully'
     });
   } catch (error) {
-    logger.error('Error disabling 2FA:', error);
+    // Error disabling 2FA
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -373,7 +369,7 @@ router.put('/password', [
       message: 'Password updated successfully'
     });
   } catch (error) {
-    logger.error('Error changing password:', error);
+    // Error changing password
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -398,7 +394,7 @@ router.get('/recovery-settings', authenticate, checkUserExists, async (req, res)
       data: recoverySettings
     });
   } catch (error) {
-    logger.error('Error getting recovery settings:', error);
+    // Error getting recovery settings
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -451,7 +447,7 @@ router.post('/recovery-settings', [
       data: recoverySettings
     });
   } catch (error) {
-    logger.error('Error setting up recovery method:', error);
+      // Error setting up recovery method
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -483,7 +479,7 @@ router.get('/blocked', authenticate, checkUserExists, async (req, res) => {
       data: formattedBlockedUsers
     });
   } catch (error) {
-    logger.error('Error getting blocked users:', error);
+    // Error getting blocked users
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -527,7 +523,7 @@ router.post('/block', [
       message: 'User blocked successfully'
     });
   } catch (error) {
-    logger.error('Error blocking user:', error);
+    // Error blocking user
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -559,7 +555,7 @@ router.delete('/block/:userId', [
       message: 'User unblocked successfully'
     });
   } catch (error) {
-    logger.error('Error unblocking user:', error);
+    // Error unblocking user
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -579,7 +575,7 @@ router.get('/emergency-contacts', authenticate, checkUserExists, async (req, res
       data: emergencyContacts
     });
   } catch (error) {
-    logger.error('Error getting emergency contacts:', error);
+    // Error getting emergency contacts
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -612,7 +608,7 @@ router.post('/emergency-contacts', [
       data: emergencyContact
     });
   } catch (error) {
-    logger.error('Error adding emergency contact:', error);
+    // Error adding emergency contact
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -644,7 +640,7 @@ router.delete('/emergency-contacts/:contactId', [
       message: 'Emergency contact removed successfully'
     });
   } catch (error) {
-    logger.error('Error removing emergency contact:', error);
+    // Error removing emergency contact
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -688,7 +684,7 @@ router.post('/report', [
       message: 'User reported successfully'
     });
   } catch (error) {
-    logger.error('Error reporting user:', error);
+    // Error reporting user
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -709,7 +705,7 @@ router.get('/reports', authenticate, checkUserExists, async (req, res) => {
       data: reports
     });
   } catch (error) {
-    logger.error('Error getting user reports:', error);
+    // Error getting user reports
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -736,7 +732,7 @@ router.post('/data-download', authenticate, checkUserExists, async (req, res) =>
       }
     });
   } catch (error) {
-    logger.error('Error requesting data download:', error);
+      // Error requesting data download
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -775,7 +771,7 @@ router.delete('/account', [
       message: 'Account deleted successfully'
     });
   } catch (error) {
-    logger.error('Error deleting account:', error);
+    // Error deleting account
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -823,7 +819,7 @@ router.get('/login-history', authenticate, checkUserExists, async (req, res) => 
       data: formattedHistory
     });
   } catch (error) {
-    logger.error('Error getting login history:', error);
+    // Error getting login history
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -877,7 +873,6 @@ router.delete('/sessions/:sessionId', [
       message: 'Session revoked successfully'
     });
   } catch (error) {
-    logger.error('Error revoking session:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });

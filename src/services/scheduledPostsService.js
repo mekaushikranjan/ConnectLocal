@@ -1,6 +1,6 @@
 import { Post, User, Notification } from '../models/index.js';
 import { Op } from 'sequelize';
-import logger from '../utils/logger.js';
+
 
 class ScheduledPostsService {
   /**
@@ -26,7 +26,7 @@ class ScheduledPostsService {
         }]
       });
 
-      logger.info(`Found ${scheduledPosts.length} scheduled posts to publish`);
+
 
       for (const post of scheduledPosts) {
         try {
@@ -37,13 +37,13 @@ class ScheduledPostsService {
             published_at: now
           });
 
-          logger.info(`Published scheduled post: ${post.id} by user: ${post.authorId}`);
+
 
           // Optionally send notifications to followers or community members
           await this.sendScheduledPostNotifications(post);
 
         } catch (error) {
-          logger.error(`Error publishing scheduled post ${post.id}:`, error);
+            // Error publishing scheduled post
         }
       }
 
@@ -54,7 +54,7 @@ class ScheduledPostsService {
       };
 
     } catch (error) {
-      logger.error('Error in publishScheduledPosts:', error);
+      // Error in publishScheduledPosts
       throw error;
     }
   }
@@ -64,7 +64,7 @@ class ScheduledPostsService {
    */
   static async sendScheduledPostNotifications(post) {
     try {
-      logger.info(`Sending notifications for scheduled post: ${post.id}`);
+        // Sending notifications for scheduled post
       
       // Get the author's followers
       const followers = await User.findAll({
@@ -110,7 +110,7 @@ class ScheduledPostsService {
       });
 
       const recipients = Array.from(allRecipients.values());
-      logger.info(`Found ${recipients.length} recipients for scheduled post notifications`);
+      // Found recipients for scheduled post notifications
 
       // Create notifications for each recipient
       const notificationPromises = recipients.map(async (recipient) => {
@@ -138,7 +138,7 @@ class ScheduledPostsService {
 
           return notification;
         } catch (error) {
-          logger.error(`Error creating notification for user ${recipient.id}:`, error);
+          // Error creating notification for user
           return null;
         }
       });
@@ -148,7 +148,7 @@ class ScheduledPostsService {
         result.status === 'fulfilled' && result.value !== null
       );
 
-      logger.info(`Successfully sent ${successfulNotifications.length} notifications for scheduled post ${post.id}`);
+      // Successfully sent notifications for scheduled post
 
       // Send email notifications for high-priority posts
       if (post.type === 'urgent' || post.type === 'event') {
@@ -156,7 +156,7 @@ class ScheduledPostsService {
       }
 
     } catch (error) {
-      logger.error(`Error sending scheduled post notifications for post ${post.id}:`, error);
+      // Error sending scheduled post notifications
     }
   }
 
@@ -205,10 +205,10 @@ class ScheduledPostsService {
       };
 
       const response = await admin.messaging().send(message);
-      logger.info(`Push notification sent to user ${user.id}: ${response}`);
+      // Push notification sent to user
       
     } catch (error) {
-      logger.error(`Error sending push notification to user ${user.id}:`, error);
+      // Error sending push notification to user
     }
   }
 
@@ -247,17 +247,17 @@ class ScheduledPostsService {
           };
 
           await emailService.sendEmail(emailData);
-          logger.info(`Email notification sent to ${recipient.email}`);
+          // Email notification sent to recipient
           
         } catch (error) {
-          logger.error(`Error sending email to ${recipient.email}:`, error);
+          // Error sending email to recipient
         }
       });
 
       await Promise.allSettled(emailPromises);
       
     } catch (error) {
-      logger.error('Error sending email notifications:', error);
+      // Error sending email notifications
     }
   }
 
@@ -292,7 +292,7 @@ class ScheduledPostsService {
       };
 
     } catch (error) {
-      logger.error('Error getting user scheduled posts:', error);
+      // Error getting user scheduled posts
       throw error;
     }
   }
@@ -341,7 +341,7 @@ class ScheduledPostsService {
       };
 
     } catch (error) {
-      logger.error('Error updating scheduled post:', error);
+      // Error updating scheduled post
       throw error;
     }
   }
@@ -371,7 +371,7 @@ class ScheduledPostsService {
       };
 
     } catch (error) {
-      logger.error('Error cancelling scheduled post:', error);
+      // Error cancelling scheduled post
       throw error;
     }
   }
@@ -418,7 +418,7 @@ class ScheduledPostsService {
       };
 
     } catch (error) {
-      logger.error('Error getting scheduled posts stats:', error);
+      // Error getting scheduled posts stats
       throw error;
     }
   }
@@ -464,7 +464,7 @@ class ScheduledPostsService {
       };
 
     } catch (error) {
-      logger.error('Error getting notification stats:', error);
+      // Error getting notification stats
       return {
         totalNotifications: 0,
         unreadNotifications: 0,
@@ -493,7 +493,7 @@ class ScheduledPostsService {
         { where: whereClause }
       );
 
-      logger.info(`Marked ${updatedCount[0]} notifications as read for user ${userId}`);
+      // Marked notifications as read
 
       return {
         success: true,
@@ -502,7 +502,7 @@ class ScheduledPostsService {
       };
 
     } catch (error) {
-      logger.error('Error marking notifications as read:', error);
+      //  Error marking notifications as read
       throw error;
     }
   }
@@ -538,7 +538,7 @@ class ScheduledPostsService {
       };
 
     } catch (error) {
-      logger.error('Error getting notification preferences:', error);
+      // Error getting notification preferences
       throw error;
     }
   }
@@ -560,7 +560,7 @@ class ScheduledPostsService {
         notificationSettings: updatedSettings
       });
 
-      logger.info(`Updated notification preferences for user ${userId}`);
+      // Updated notification preferences
 
       return {
         success: true,
@@ -569,7 +569,7 @@ class ScheduledPostsService {
       };
 
     } catch (error) {
-      logger.error('Error updating notification preferences:', error);
+      // Error updating notification preferences
       throw error;
     }
   }

@@ -74,8 +74,7 @@ router.post('/start', authenticate, asyncHandler(async (req, res) => {
       await Notification.bulkCreate(notifications);
     }
   } catch (error) {
-    console.error('Error sending notifications to admins:', error);
-    // Don't fail the request if notifications fail
+      // Don't fail the request if notifications fail
   }
 
   res.json({

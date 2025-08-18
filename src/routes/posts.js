@@ -495,7 +495,6 @@ router.get('/bookmarks', authenticate, asyncHandler(async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error fetching bookmarks:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching bookmarks',
@@ -553,7 +552,6 @@ router.get('/user/:userId', asyncHandler(async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error fetching user posts:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching user posts',
@@ -828,7 +826,6 @@ router.get('/bookmarks', authenticate, asyncHandler(async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error fetching bookmarks:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching bookmarks',
@@ -886,7 +883,6 @@ router.get('/user/:userId', asyncHandler(async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error fetching user posts:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching user posts',
@@ -913,7 +909,6 @@ router.get('/scheduled', authenticate, asyncHandler(async (req, res) => {
 
     res.json(result);
   } catch (error) {
-    console.error('Error fetching scheduled posts:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching scheduled posts',
@@ -940,7 +935,6 @@ router.put('/scheduled/:postId', authenticate, asyncHandler(async (req, res) => 
 
     res.json(result);
   } catch (error) {
-    console.error('Error updating scheduled post:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating scheduled post',
@@ -965,7 +959,6 @@ router.delete('/scheduled/:postId', authenticate, asyncHandler(async (req, res) 
 
     res.json(result);
   } catch (error) {
-    console.error('Error cancelling scheduled post:', error);
     res.status(500).json({
       success: false,
       message: 'Error cancelling scheduled post',
@@ -984,7 +977,6 @@ router.get('/scheduled/stats', authenticate, asyncHandler(async (req, res) => {
     const result = await ScheduledPostsService.getScheduledPostsStats(req.user.id);
     res.json(result);
   } catch (error) {
-    console.error('Error fetching scheduled posts stats:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching scheduled posts stats',
@@ -1011,7 +1003,6 @@ router.post('/scheduled/publish', authenticate, asyncHandler(async (req, res) =>
     const result = await ScheduledPostsService.publishScheduledPosts();
     res.json(result);
   } catch (error) {
-    console.error('Error publishing scheduled posts:', error);
     res.status(500).json({
       success: false,
       message: 'Error publishing scheduled posts',
@@ -1033,7 +1024,6 @@ router.get('/scheduled/notifications', authenticate, asyncHandler(async (req, re
       data: result
     });
   } catch (error) {
-    console.error('Error getting scheduled post notifications:', error);
     res.status(500).json({
       success: false,
       message: 'Error getting notifications',
@@ -1053,7 +1043,6 @@ router.put('/scheduled/notifications/read', authenticate, asyncHandler(async (re
     const result = await ScheduledPostsService.markNotificationsAsRead(req.user.id, notificationIds);
     res.json(result);
   } catch (error) {
-    console.error('Error marking notifications as read:', error);
     res.status(500).json({
       success: false,
       message: 'Error marking notifications as read',
@@ -1072,7 +1061,6 @@ router.get('/scheduled/notifications/preferences', authenticate, asyncHandler(as
     const result = await ScheduledPostsService.getNotificationPreferences(req.user.id);
     res.json(result);
   } catch (error) {
-    console.error('Error getting notification preferences:', error);
     res.status(500).json({
       success: false,
       message: 'Error getting notification preferences',
@@ -1092,7 +1080,6 @@ router.put('/scheduled/notifications/preferences', authenticate, asyncHandler(as
     const result = await ScheduledPostsService.updateNotificationPreferences(req.user.id, preferences);
     res.json(result);
   } catch (error) {
-    console.error('Error updating notification preferences:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating notification preferences',

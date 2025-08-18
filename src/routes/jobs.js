@@ -1,7 +1,7 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { Job, JobApplication, User, Notification } from '../models/index.js';
+import { Job, JobApplication, User } from '../models/index.js';
 import { Op } from 'sequelize';
 
 const router = express.Router();

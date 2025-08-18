@@ -7,7 +7,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { User, Notification, LoginHistory } from '../models/index.js';
 import emailService from '../services/emailService.js';
 import smsService from '../services/smsService.js';
-import logger from '../utils/logger.js';
+
 import { createLoginHistory, getClientIP } from '../utils/loginHistory.js';
 import { Op } from 'sequelize';
 
@@ -23,10 +23,6 @@ const router = express.Router();
  * @access  Public
  */
 router.get('/test', (req, res) => {
-  console.log('🔍 /auth/test endpoint called');
-  console.log('  - Request headers:', Object.keys(req.headers));
-  console.log('  - Authorization header:', req.header('Authorization') ? 'Present' : 'Missing');
-  
   res.json({
     success: true,
     message: 'Auth API is working!',
@@ -92,7 +88,6 @@ router.post('/register', asyncHandler(async (req, res) => {
   try {
     await emailService.sendVerificationEmail(user.email, user.displayName, verificationToken);
   } catch (error) {
-    logger.error('Failed to send verification email:', error);
     // Don't fail registration if email fails
   }
 
@@ -139,29 +134,12 @@ router.post('/register', asyncHandler(async (req, res) => {
 router.post('/login', asyncHandler(async (req, res) => {
   const { email, password, deviceInfo } = req.body;
 
-  console.log('🔍 Login attempt:', {
-    email: email ? email.toLowerCase() : 'undefined',
-    hasPassword: !!password,
-    passwordLength: password ? password.length : 0,
-    hasDeviceInfo: !!deviceInfo
-  });
-
   // Find user by email
   const user = await User.findOne({ 
     where: { email: email.toLowerCase() }
   });
 
-  console.log('🔍 User lookup result:', {
-    userFound: !!user,
-    userId: user?.id,
-    userEmail: user?.email,
-    emailVerified: user?.email_verified,
-    userStatus: user?.status,
-    hasPassword: !!user?.password
-  });
-
   if (!user) {
-    console.log('❌ Login failed: User not found');
     return res.status(401).json({
       success: false,
       message: 'Invalid credentials'
@@ -169,16 +147,9 @@ router.post('/login', asyncHandler(async (req, res) => {
   }
 
   // Check password
-  console.log('🔍 Checking password...');
   const isPasswordValid = await bcrypt.compare(password, user.password);
-  console.log('🔍 Password validation result:', {
-    isValid: isPasswordValid,
-    providedPassword: password ? `${password.length} chars` : 'undefined',
-    storedPasswordHash: user.password ? `${user.password.length} chars` : 'undefined'
-  });
 
   if (!isPasswordValid) {
-    console.log('❌ Login failed: Invalid password');
     return res.status(401).json({
       success: false,
       message: 'Invalid credentials'
@@ -186,18 +157,11 @@ router.post('/login', asyncHandler(async (req, res) => {
   }
 
   // Check if email is verified - BLOCK LOGIN IF NOT VERIFIED
-  console.log('🔍 Checking email verification:', {
-    emailVerified: user.email_verified,
-    email: user.email
-  });
-
   // In development mode, auto-verify email for testing
   if (!user.email_verified) {
     if (process.env.NODE_ENV === 'development' || process.env.AUTO_VERIFY_EMAIL === 'true') {
-      console.log('🔧 Development mode: Auto-verifying email');
       await user.update({ email_verified: true });
     } else {
-      console.log('❌ Login failed: Email not verified');
       return res.status(401).json({
         success: false,
         message: 'Please verify your email address before logging in. Check your inbox for the verification link.',
@@ -207,11 +171,6 @@ router.post('/login', asyncHandler(async (req, res) => {
   }
 
   // Check if account is active
-  console.log('🔍 Checking account status:', {
-    status: user.status,
-    isActive: user.status === 'active'
-  });
-
   if (user.status !== 'active') {
     let message = 'Account is not active';
     if (user.status === 'suspended') {
@@ -220,15 +179,12 @@ router.post('/login', asyncHandler(async (req, res) => {
       message = 'Account is banned. Please contact support.';
     }
     
-    console.log('❌ Login failed: Account not active -', user.status);
     return res.status(401).json({
       success: false,
       message,
       moderationReason: user.moderationReason
     });
   }
-
-  console.log('✅ All login checks passed, generating tokens...');
 
   // Update last login and device info
   const updateData = {
@@ -268,11 +224,7 @@ router.post('/login', asyncHandler(async (req, res) => {
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 
-  console.log('✅ JWT token generated:', {
-    tokenLength: token.length,
-    tokenStart: token.substring(0, 20) + '...',
-    userId: user.id
-  });
+
 
   // Handle existing sessions from same IP before creating new login history
   try {
@@ -289,8 +241,6 @@ router.post('/login', asyncHandler(async (req, res) => {
     });
 
     if (existingSessions.length > 0) {
-      logger.info(`Found ${existingSessions.length} existing active session(s) from same IP ${clientIP} for user ${user.id}`);
-      
       // Mark older sessions as inactive (keep the most recent one active if it's recent)
       const now = new Date();
       const recentThreshold = 5 * 60 * 1000; // 5 minutes in milliseconds
@@ -305,18 +255,15 @@ router.post('/login', asyncHandler(async (req, res) => {
             logout_at: new Date(),
             last_activity_at: new Date()
           });
-          logger.info(`Marked older session ${session.id} as inactive for user ${user.id}`);
         } else {
           // Keep recent sessions active but update last activity
           await session.update({
             last_activity_at: new Date()
           });
-          logger.info(`Updated last activity for recent session ${session.id} for user ${user.id}`);
         }
       }
     }
   } catch (error) {
-    logger.error('Failed to handle existing sessions from same IP:', error);
     // Don't fail login if session handling fails
   }
 
@@ -330,9 +277,7 @@ router.post('/login', asyncHandler(async (req, res) => {
       locationInfo,
       request: req
     });
-    logger.info(`New login history created for user ${user.id} with session ${token.substring(0, 10)}...`);
   } catch (error) {
-    logger.error('Failed to create login history:', error);
     // Don't fail login if history creation fails
   }
 
@@ -343,7 +288,7 @@ router.post('/login', asyncHandler(async (req, res) => {
     { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
   );
 
-  console.log('✅ Login successful for user:', user.email);
+
 
   res.json({
     success: true,
@@ -450,7 +395,6 @@ router.post('/social', asyncHandler(async (req, res) => {
       return res.status(400).json({ success: false, message: 'Unsupported provider' });
     }
   } catch (err) {
-    logger.error('Social sign-in failed:', err);
     return res.status(401).json({ success: false, message: 'Social sign-in failed', detail: err.message });
   }
 
@@ -465,7 +409,6 @@ router.post('/social', asyncHandler(async (req, res) => {
   try {
     decoded = await admin.auth().verifyIdToken(firebaseIdToken);
   } catch (err) {
-    logger.error('Failed to verify Firebase ID token:', err);
     return res.status(401).json({ success: false, message: 'Invalid Firebase ID token' });
   }
 
@@ -623,7 +566,6 @@ router.post('/twitter/callback', asyncHandler(async (req, res) => {
     const fr = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postBody, requestUri: 'http://localhost', returnSecureToken: true }) });
     const json = await fr.json();
     if (!fr.ok) {
-      logger.error('Twitter Firebase signInWithIdp failed', json);
       return res.status(500).json({ success: false, message: 'Twitter Firebase sign-in failed' });
     }
 
@@ -663,7 +605,6 @@ router.post('/twitter/callback', asyncHandler(async (req, res) => {
 
     return res.json({ success: true, data: { user: { id: user.id, email: user.email, displayName: user.displayName, avatarUrl: user.avatarUrl, role: user.role, status: user.status, createdAt: user.createdAt }, token: tokenJwt, refreshToken } });
   } catch (err) {
-    logger.error('Twitter callback error:', err);
     return res.status(500).json({ success: false, message: 'Twitter sign-in failed' });
   }
 }));
@@ -772,9 +713,7 @@ router.post('/logout', authenticate, asyncHandler(async (req, res) => {
       await req.user.update({ devices: [] });
     }
     
-    logger.info(`Logout completed for user ${req.user.id}, deviceId: ${deviceId || 'all devices'}`);
   } catch (error) {
-    logger.error('Failed to update login history during logout:', error);
     // Don't fail logout if login history update fails
   }
 
@@ -790,9 +729,6 @@ router.post('/logout', authenticate, asyncHandler(async (req, res) => {
  * @access  Private
  */
 router.get('/me', authenticate, asyncHandler(async (req, res) => {
-  console.log('🔍 /auth/me endpoint called');
-  console.log('  - User ID:', req.user.id);
-  console.log('  - User email:', req.user.email);
   
   res.json({
     success: true,
@@ -877,8 +813,6 @@ router.post('/forgot-password', asyncHandler(async (req, res) => {
       password_reset_otp_expires: null
     });
 
-    logger.error('Failed to send password reset OTP email:', error);
-    
     return res.status(500).json({
       success: false,
       message: 'Failed to send password reset OTP. Please try again.'
@@ -1004,7 +938,6 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
       });
     }
     
-    logger.error('Password reset error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to reset password'
@@ -1091,7 +1024,6 @@ router.get('/reset-password', asyncHandler(async (req, res) => {
       });
     }
     
-    logger.error('Password reset token verification error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to verify reset token'
@@ -1149,6 +1081,13 @@ router.post('/verify-email', asyncHandler(async (req, res) => {
     type: 'account_verification',
     priority: 'normal'
   });
+
+  // Send welcome email after successful verification
+  try {
+    await emailService.sendWelcomeEmail(user.email, user.displayName);
+  } catch (error) {
+    // Don't fail verification if welcome email fails
+  }
 
   res.json({
     success: true,
@@ -1230,6 +1169,13 @@ router.get('/verify-email', asyncHandler(async (req, res) => {
     priority: 'normal'
   });
 
+  // Send welcome email after successful verification
+  try {
+    await emailService.sendWelcomeEmail(user.email, user.displayName);
+  } catch (error) {
+    // Don't fail verification if welcome email fails
+  }
+
   // For mobile apps, redirect to the app using a deep link
   // The app will handle the verification success
   const appScheme = process.env.APP_SCHEME || 'localconnect';
@@ -1238,29 +1184,310 @@ router.get('/verify-email', asyncHandler(async (req, res) => {
   // Create a simple HTML page that redirects to the mobile app
   const html = `
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>Email Verified - LocalConnect</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>
-        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-        .success { color: #4CAF50; font-size: 24px; margin-bottom: 20px; }
-        .message { color: #666; margin-bottom: 30px; }
-        .button { background: #4A90E2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; }
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+          line-height: 1.6;
+          color: #333;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+        }
+        
+        .container {
+          max-width: 600px;
+          width: 100%;
+          background-color: #ffffff;
+          border-radius: 16px;
+          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+          overflow: hidden;
+          animation: slideUp 0.6s ease-out;
+        }
+        
+        @keyframes slideUp {
+          from {
+            opacity: 0;
+            transform: translateY(30px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        .header {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          padding: 40px 30px;
+          text-align: center;
+          position: relative;
+        }
+        
+        .logo {
+          width: 80px;
+          height: 80px;
+          border-radius: 50%;
+          margin: 0 auto 20px;
+          display: block;
+          background-color: white;
+          padding: 10px;
+          box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+          animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+          0% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.05);
+          }
+          100% {
+            transform: scale(1);
+          }
+        }
+        
+        .header h1 {
+          font-size: 32px;
+          font-weight: 700;
+          margin-bottom: 10px;
+          text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header p {
+          font-size: 18px;
+          opacity: 0.9;
+          font-weight: 300;
+        }
+        
+        .content {
+          padding: 40px 30px;
+          text-align: center;
+        }
+        
+        .success-icon {
+          width: 100px;
+          height: 100px;
+          background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+          border-radius: 50%;
+          margin: 0 auto 30px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          animation: bounce 1s ease-in-out;
+        }
+        
+        @keyframes bounce {
+          0%, 20%, 50%, 80%, 100% {
+            transform: translateY(0);
+          }
+          40% {
+            transform: translateY(-10px);
+          }
+          60% {
+            transform: translateY(-5px);
+          }
+        }
+        
+        .success-icon::after {
+          content: "✓";
+          color: white;
+          font-size: 50px;
+          font-weight: bold;
+        }
+        
+        .success-message {
+          font-size: 18px;
+          color: #4a5568;
+          margin-bottom: 30px;
+          line-height: 1.7;
+        }
+        
+        .auto-redirect {
+          background-color: #e8f5e8;
+          border: 1px solid #4CAF50;
+          border-radius: 8px;
+          padding: 15px;
+          margin: 25px 0;
+          text-align: center;
+        }
+        
+        .auto-redirect p {
+          color: #2d3748;
+          font-size: 14px;
+          margin-bottom: 5px;
+        }
+        
+        .countdown {
+          color: #4CAF50;
+          font-weight: 600;
+          font-size: 16px;
+        }
+        
+        .cta-section {
+          margin: 35px 0;
+        }
+        
+        .button {
+          display: inline-block;
+          padding: 16px 32px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          text-decoration: none;
+          border-radius: 8px;
+          font-weight: 600;
+          font-size: 16px;
+          transition: all 0.3s ease;
+          box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+          margin: 10px;
+        }
+        
+        .button:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+        
+        .secondary-button {
+          background: transparent;
+          color: #667eea;
+          border: 2px solid #667eea;
+          box-shadow: none;
+        }
+        
+        .secondary-button:hover {
+          background: #667eea;
+          color: white;
+        }
+        
+        .footer {
+          background-color: #f7fafc;
+          padding: 25px 30px;
+          text-align: center;
+          border-top: 1px solid #e2e8f0;
+        }
+        
+        .footer p {
+          color: #718096;
+          font-size: 14px;
+          margin-bottom: 10px;
+        }
+        
+        .footer .team {
+          color: #2d3748;
+          font-weight: 600;
+        }
+        
+        .social-links {
+          margin-top: 15px;
+        }
+        
+        .social-links a {
+          display: inline-block;
+          margin: 0 10px;
+          color: #667eea;
+          text-decoration: none;
+          font-weight: 500;
+        }
+        
+        @media (max-width: 600px) {
+          .container {
+            margin: 10px;
+            border-radius: 12px;
+          }
+          
+          .header, .content, .footer {
+            padding: 25px 20px;
+          }
+          
+          .header h1 {
+            font-size: 24px;
+          }
+        }
       </style>
     </head>
     <body>
-      <div class="success">✅ Email Verified Successfully!</div>
-      <div class="message">Your email has been verified. You will be redirected to the LocalConnect app.</div>
-      <p>If you're not redirected automatically, <a href="${redirectUrl}" class="button">Open LocalConnect App</a></p>
-      <script>
-        // Try to open the mobile app
-        window.location.href = '${redirectUrl}';
+      <div class="container">
+        <div class="header">
+          <img src="cid:icon.png" alt="LocalConnect" class="logo">
+          <h1>🎉 Email Verified Successfully!</h1>
+          <p>Welcome to your local community</p>
+        </div>
         
-        // Fallback: if app doesn't open within 3 seconds, show manual link
-        setTimeout(function() {
-          document.body.innerHTML = '<div class="success">✅ Email Verified Successfully!</div><div class="message">Please open the LocalConnect app to continue.</div><a href="${redirectUrl}" class="button">Open LocalConnect App</a>';
-        }, 3000);
+        <div class="content">
+          <div class="success-icon"></div>
+          
+          <div class="success-message">
+            Your email has been successfully verified. You're now part of the LocalConnect community!
+          </div>
+          
+          <div class="auto-redirect">
+            <p>You will be automatically redirected to the LocalConnect app in <span class="countdown" id="countdown">5</span> seconds.</p>
+            <p>If you're not redirected automatically, click the button below.</p>
+          </div>
+          
+          <div class="cta-section">
+            <a href="${redirectUrl}" class="button">Open LocalConnect App</a>
+            <a href="${process.env.FRONTEND_URL}" class="button secondary-button">Continue in Browser</a>
+          </div>
+        </div>
+        
+        <div class="footer">
+          <p class="team">Best regards,<br>The LocalConnect Team</p>
+          <div class="social-links">
+            <a href="#">Help Center</a> • 
+            <a href="#">Contact Support</a> • 
+            <a href="#">Privacy Policy</a>
+          </div>
+        </div>
+      </div>
+
+      <script>
+        // Countdown timer for auto-redirect
+        let countdown = 5;
+        const countdownElement = document.getElementById('countdown');
+        
+        const timer = setInterval(() => {
+          countdown--;
+          countdownElement.textContent = countdown;
+          
+          if (countdown <= 0) {
+            clearInterval(timer);
+            // Try to open the app, fallback to web
+            window.location.href = '${redirectUrl}';
+            
+            // Fallback after 2 seconds if app doesn't open
+            setTimeout(() => {
+              window.location.href = '${process.env.FRONTEND_URL}';
+            }, 2000);
+          }
+        }, 1000);
+        
+        // Add some interactive effects
+        document.addEventListener('DOMContentLoaded', function() {
+          const buttons = document.querySelectorAll('.button');
+          buttons.forEach(button => {
+            button.addEventListener('mouseenter', function() {
+              this.style.transform = 'translateY(-2px)';
+            });
+            button.addEventListener('mouseleave', function() {
+              this.style.transform = 'translateY(0)';
+            });
+          });
+        });
       </script>
     </body>
     </html>
@@ -1300,8 +1527,6 @@ router.post('/resend-verification', authenticate, asyncHandler(async (req, res) 
       message: 'Verification email sent successfully'
     });
   } catch (error) {
-    logger.error('Failed to send verification email:', error);
-    
     return res.status(500).json({
       success: false,
       message: 'Failed to send verification email. Please try again.'
@@ -1361,8 +1586,6 @@ router.post('/resend-verification-public', asyncHandler(async (req, res) => {
       message: 'Verification email sent successfully'
     });
   } catch (error) {
-    logger.error('Failed to send verification email:', error);
-    
     return res.status(500).json({
       success: false,
       message: 'Failed to send verification email. Please try again.'
@@ -1496,8 +1719,6 @@ router.post('/send-phone-verification', authenticate, asyncHandler(async (req, r
       message: 'Phone verification code sent successfully'
     });
   } catch (error) {
-    logger.error('Failed to send phone verification SMS:', error);
-    
     // Clear OTP on failure
     await req.user.update({
       phone_verification_otp: null,
@@ -1634,8 +1855,6 @@ router.post('/forgot-password-sms', asyncHandler(async (req, res) => {
       message: 'Password reset code has been sent to your phone.'
     });
   } catch (error) {
-    logger.error('Failed to send password reset SMS:', error);
-    
     // Clear OTP on failure
     await user.update({
       password_reset_otp: null,
