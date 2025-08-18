@@ -131,12 +131,29 @@ router.post('/register', asyncHandler(async (req, res) => {
 router.post('/login', asyncHandler(async (req, res) => {
   const { email, password, deviceInfo } = req.body;
 
+  console.log('🔍 Login attempt:', {
+    email: email ? email.toLowerCase() : 'undefined',
+    hasPassword: !!password,
+    passwordLength: password ? password.length : 0,
+    hasDeviceInfo: !!deviceInfo
+  });
+
   // Find user by email
   const user = await User.findOne({ 
     where: { email: email.toLowerCase() }
   });
 
+  console.log('🔍 User lookup result:', {
+    userFound: !!user,
+    userId: user?.id,
+    userEmail: user?.email,
+    emailVerified: user?.email_verified,
+    userStatus: user?.status,
+    hasPassword: !!user?.password
+  });
+
   if (!user) {
+    console.log('❌ Login failed: User not found');
     return res.status(401).json({
       success: false,
       message: 'Invalid credentials'
@@ -144,8 +161,16 @@ router.post('/login', asyncHandler(async (req, res) => {
   }
 
   // Check password
+  console.log('🔍 Checking password...');
   const isPasswordValid = await bcrypt.compare(password, user.password);
+  console.log('🔍 Password validation result:', {
+    isValid: isPasswordValid,
+    providedPassword: password ? `${password.length} chars` : 'undefined',
+    storedPasswordHash: user.password ? `${user.password.length} chars` : 'undefined'
+  });
+
   if (!isPasswordValid) {
+    console.log('❌ Login failed: Invalid password');
     return res.status(401).json({
       success: false,
       message: 'Invalid credentials'
@@ -153,7 +178,13 @@ router.post('/login', asyncHandler(async (req, res) => {
   }
 
   // Check if email is verified - BLOCK LOGIN IF NOT VERIFIED
+  console.log('🔍 Checking email verification:', {
+    emailVerified: user.email_verified,
+    email: user.email
+  });
+
   if (!user.email_verified) {
+    console.log('❌ Login failed: Email not verified');
     return res.status(401).json({
       success: false,
       message: 'Please verify your email address before logging in. Check your inbox for the verification link.',
@@ -162,6 +193,11 @@ router.post('/login', asyncHandler(async (req, res) => {
   }
 
   // Check if account is active
+  console.log('🔍 Checking account status:', {
+    status: user.status,
+    isActive: user.status === 'active'
+  });
+
   if (user.status !== 'active') {
     let message = 'Account is not active';
     if (user.status === 'suspended') {
@@ -170,12 +206,15 @@ router.post('/login', asyncHandler(async (req, res) => {
       message = 'Account is banned. Please contact support.';
     }
     
+    console.log('❌ Login failed: Account not active -', user.status);
     return res.status(401).json({
       success: false,
       message,
       moderationReason: user.moderationReason
     });
   }
+
+  console.log('✅ All login checks passed, generating tokens...');
 
   // Update last login and device info
   const updateData = {
@@ -214,6 +253,12 @@ router.post('/login', asyncHandler(async (req, res) => {
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
+
+  console.log('✅ JWT token generated:', {
+    tokenLength: token.length,
+    tokenStart: token.substring(0, 20) + '...',
+    userId: user.id
+  });
 
   // Handle existing sessions from same IP before creating new login history
   try {
@@ -283,6 +328,8 @@ router.post('/login', asyncHandler(async (req, res) => {
     process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
   );
+
+  console.log('✅ Login successful for user:', user.email);
 
   res.json({
     success: true,
