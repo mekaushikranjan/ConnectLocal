@@ -139,11 +139,41 @@ if (process.env.NODE_ENV === 'production') {
   app.use('/api/auth/login', rateLimiters.login);
   app.use('/api/auth/register', rateLimiters.register);
   app.use('/api/auth/forgot-password', rateLimiters.passwordReset);
-  app.use('/api/upload/', rateLimiters.upload);
-  app.use('/api/posts/', rateLimiters.postCreation);
-  app.use('/api/comments/', rateLimiters.comments);
-  app.use('/api/messages/', rateLimiters.messages);
-  app.use('/api/livechat/', rateLimiters.liveChat);
+  // Only apply upload rate limiting to POST requests
+  app.use('/api/upload', (req, res, next) => {
+    if (req.method === 'POST') {
+      return rateLimiters.upload(req, res, next);
+    }
+    next();
+  });
+  // Only apply post creation rate limiting to POST requests
+  app.use('/api/posts', (req, res, next) => {
+    if (req.method === 'POST') {
+      return rateLimiters.postCreation(req, res, next);
+    }
+    next();
+  });
+  // Only apply comment rate limiting to POST requests
+  app.use('/api/comments', (req, res, next) => {
+    if (req.method === 'POST') {
+      return rateLimiters.comments(req, res, next);
+    }
+    next();
+  });
+  // Only apply message rate limiting to POST requests
+  app.use('/api/messages', (req, res, next) => {
+    if (req.method === 'POST') {
+      return rateLimiters.messages(req, res, next);
+    }
+    next();
+  });
+  // Only apply livechat rate limiting to POST requests
+  app.use('/api/livechat', (req, res, next) => {
+    if (req.method === 'POST') {
+      return rateLimiters.liveChat(req, res, next);
+    }
+    next();
+  });
   app.use('/api/search/', rateLimiters.search);
   app.use('/api/notifications/', rateLimiters.notifications);
 }

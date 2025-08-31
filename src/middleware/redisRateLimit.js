@@ -79,7 +79,7 @@ export const rateLimiters = {
   // Authentication rate limiting
   auth: createRedisRateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 10,
+    max: 100,
     message: 'Too many authentication attempts, please try again later.',
     keyGenerator: (req) => `auth:${req.ip || req.connection.remoteAddress || 'unknown'}`
   }),
@@ -87,7 +87,7 @@ export const rateLimiters = {
   // Login rate limiting
   login: createRedisRateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5,
+    max: 100,
     message: 'Too many login attempts, please try again later.',
     keyGenerator: (req) => `login:${req.ip || req.connection.remoteAddress || 'unknown'}`
   }),
