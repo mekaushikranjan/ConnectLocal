@@ -70,7 +70,7 @@ const config = {
     },
     define: {
       timestamps: true,
-      underscored: false,
+      underscored: true,
       freezeTableName: true
     },
     dialectOptions: {

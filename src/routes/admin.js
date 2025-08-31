@@ -93,12 +93,12 @@ router.get('/dashboard/activity', authenticate, isAdmin, asyncHandler(async (req
     // Get recent moderation logs as activity
     const activities = await ModerationLog.findAll({
       limit: parseInt(limit),
-      order: [['created_at', 'DESC']],
+      order: [['createdAt', 'DESC']],
       include: [
         {
           model: User,
           as: 'moderator',
-          attributes: ['id', 'username', 'display_name']
+          attributes: ['id', 'username', 'displayName']
         }
       ]
     });
@@ -116,7 +116,7 @@ router.get('/dashboard/activity', authenticate, isAdmin, asyncHandler(async (req
             targetId: log.targetId,
             reason: log.reason
           },
-          timestamp: log.created_at
+          timestamp: log.createdAt
         }))
       }
     });
@@ -151,7 +151,7 @@ router.get('/users', authenticate, isAdmin, asyncHandler(async (req, res) => {
       whereClause[Op.or] = [
         { username: { [Op.iLike]: `%${search}%` } },
         { email: { [Op.iLike]: `%${search}%` } },
-        { display_name: { [Op.iLike]: `%${search}%` } }
+        { displayName: { [Op.iLike]: `%${search}%` } }
       ];
     }
     if (status) whereClause.status = status;
@@ -161,7 +161,7 @@ router.get('/users', authenticate, isAdmin, asyncHandler(async (req, res) => {
       where: whereClause,
       limit: parseInt(limit),
       offset: parseInt(offset),
-      order: [['created_at', 'DESC']]
+      order: [['createdAt', 'DESC']]
     });
 
     res.json({
@@ -173,7 +173,7 @@ router.get('/users', authenticate, isAdmin, asyncHandler(async (req, res) => {
           email: user.email,
           role: user.role,
           status: user.status,
-          createdAt: user.created_at,
+          createdAt: user.createdAt,
           lastActive: user.last_active,
           warningCount: 0, // Placeholder - you may need to add this field to User model
           suspensionHistory: [] // Placeholder - you may need to add this to User model
@@ -376,12 +376,12 @@ router.get('/reports', authenticate, isAdmin, asyncHandler(async (req, res) => {
           id: report.id,
           type: report.content_type,
           status: report.status,
-          createdAt: report.created_at,
+          createdAt: report.createdAt,
           userId: report.reported_user_id,
           content: report.content_data,
           reporter: {
             id: report.reporter?.id,
-            displayName: report.reporter?.display_name,
+            displayName: report.reporter?.displayName,
             username: report.reporter?.username
           },
           reason: report.reason,
