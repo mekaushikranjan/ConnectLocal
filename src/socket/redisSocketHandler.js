@@ -1,5 +1,6 @@
 import { Server } from 'socket.io';
 import { createClient } from 'redis';
+import { createAdapter } from '@socket.io/redis-adapter';
 import jwt from 'jsonwebtoken';
 import models from '../models/index.js';
 import RedisService from '../services/redisService.js';
@@ -17,28 +18,52 @@ class RedisSocketHandler {
 
   async initialize(server) {
     try {
-      // Create Socket.io server without Redis adapter for now
+      // Create Redis clients for Socket.IO adapter
+      const pubClient = createClient({
+        url: process.env.REDIS_URL || 'redis://default:R3i8JWExclJVM8m6QSceneWSrWNlY03e@redis-14143.c240.us-east-1-3.ec2.redns.redis-cloud.com:14143',
+        socket: {
+          connectTimeout: 10000,
+          reconnectStrategy: (retries) => {
+            if (retries > 10) {
+              console.error('Redis pub client connection failed after 10 retries');
+              return new Error('Redis pub client connection failed');
+            }
+            return Math.min(retries * 100, 3000);
+          }
+        }
+      });
+
+      const subClient = pubClient.duplicate();
+
+      // Connect Redis clients
+      await Promise.all([pubClient.connect(), subClient.connect()]);
+
+      // Create Socket.io server with Redis adapter
       this.io = new Server(server, {
         cors: {
           origin: process.env.FRONTEND_URL || [
             "http://localhost:8081", 
-            "http://172.26.26.235:8081", 
-            "exp://10.110.74.235:8081"
+            "http://localhost:3000",
+            "exp://localhost:8081",
+            "https://connectlocal-rjwq.onrender.com",
+            "*"
           ],
           methods: ["GET", "POST"],
           credentials: true
         },
         transports: ['websocket', 'polling'],
         pingTimeout: 60000,
-        pingInterval: 25000
+        pingInterval: 25000,
+        adapter: createAdapter(pubClient, subClient)
       });
+
+      console.log('✅ Socket.IO server initialized with Redis adapter');
 
       // Set up authentication middleware
       this.setupAuthentication();
       
       // Set up event handlers
       this.setupEventHandlers();
-
 
       return this.io;
     } catch (error) {

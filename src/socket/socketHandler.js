@@ -34,8 +34,10 @@ export const initializeSocket = (server) => {
     cors: {
       origin: process.env.FRONTEND_URL || [
         "http://localhost:8081", 
-        "http://10.110.74.235:8081", 
-        "exp://10.110.74.235:8081"
+        "http://localhost:3000",
+        "exp://localhost:8081",
+        "https://connectlocal-rjwq.onrender.com",
+        "*"
       ],
       methods: ["GET", "POST"],
       credentials: true

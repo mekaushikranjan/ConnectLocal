@@ -873,7 +873,11 @@ router.post('/street/remove-from-others', authenticate, asyncHandler(async (req,
  * @access  Private
  */
 router.get('/street/my-memberships', authenticate, asyncHandler(async (req, res) => {
+  console.log(`🔍 Street groups request for user: ${req.user.id}`);
+  
   const memberships = await cityGroupService.getUserStreetGroupMemberships(req.user.id);
+  
+  console.log(`📋 Street groups response: ${memberships.length} groups`);
 
   res.json({
     success: true,

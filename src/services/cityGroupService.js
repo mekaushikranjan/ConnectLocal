@@ -697,118 +697,126 @@ class CityGroupService {
   }
 
   /**
-   * Auto-join user to existing street group based on their location
+   * Auto-join user to existing street group or create one
    * @param {string} userId - User ID
-   * @param {string} streetName - Street name from user's location
+   * @param {string} street - Street name
    * @param {string} city - City name
    * @param {string} state - State/province
    * @param {string} country - Country
-   * @param {string} formattedAddress - Full formatted address
-   * @returns {Promise<Object>} Result of auto-join operation
+   * @returns {Promise<Object>} Join result
    */
-  async autoJoinStreetGroup(userId, streetName, city, state, country, formattedAddress) {
+  async autoJoinStreetGroup(userId, street, city, state = null, country = null) {
+    if (!userId || !city) {
+      throw new Error('User ID and city are required');
+    }
+
     try {
+      // If no street name, use city as fallback
+      const streetName = street || city;
+      const groupName = `${streetName} Street Community`;
+      const groupDescription = `Connect with neighbors on ${streetName} in ${city}${state ? `, ${state}` : ''}${country ? `, ${country}` : ''}. Share local updates, events, and connect with your street community!`;
 
+      // Check if street group already exists
+      const whereClause = {
+        category: 'street',
+        status: 'active'
+      };
 
-      // Find existing street group
-      let existingGroup = await this.findStreetGroup(streetName, city, state, country);
-      
-      // If no street group exists, create one automatically
-      if (!existingGroup) {
-        try {
-          const createResult = await this.createStreetGroup(
-            streetName, 
-            city, 
-            state, 
-            country, 
-            formattedAddress, 
-            null, // latitude - will be null for now
-            null, // longitude - will be null for now
-            userId // created by the user
-          );
-          
-          if (createResult.success) {
-            existingGroup = createResult.group;
-          } else {
-            return {
-              success: false,
-              message: createResult.message,
-              groupId: null
-            };
-          }
-        } catch (error) {
-          return {
-            success: false,
-            message: `Failed to create street group for ${streetName}, ${city}`,
-            error: error.message
-          };
-        }
+      if (street) {
+        whereClause['location_json.street'] = { [Op.iLike]: `%${street}%` };
+      }
+      if (city) {
+        whereClause['location_json.city'] = { [Op.iLike]: `%${city}%` };
+      }
+      if (state) {
+        whereClause['location_json.state'] = { [Op.iLike]: `%${state}%` };
+      }
+      if (country) {
+        whereClause['location_json.country'] = { [Op.iLike]: `%${country}%` };
+      }
+
+      let streetGroup = await Group.findOne({
+        where: whereClause
+      });
+
+      if (!streetGroup) {
+        // Create new street group
+        streetGroup = await Group.create({
+          name: groupName,
+          description: groupDescription,
+          category: 'street',
+          privacy: 'public',
+          location_json: {
+            street: street || null,
+            city: city,
+            state: state || null,
+            country: country || null,
+            formattedAddress: `${street || ''}, ${city}, ${state || ''}, ${country || ''}`.replace(/,\s*,/g, ',').replace(/^,\s*/, '').replace(/,\s*$/, '')
+          },
+          settings_json: {
+            allowInvites: true,
+            requireApproval: false,
+            allowPosts: true,
+            allowComments: true,
+            isStreetGroup: true,
+            autoJoinEnabled: true
+          },
+          tags: ['street', 'local', 'neighborhood'],
+          created_by: userId
+        });
+
+        console.log(`✅ Created new street group: ${groupName}`);
       }
 
       // Check if user is already a member
       const existingMembership = await GroupMember.findOne({
         where: {
-          group_id: existingGroup.id,
-          user_id: userId,
-          status: 'active'
+          group_id: streetGroup.id,
+          user_id: userId
         }
       });
 
       if (existingMembership) {
-        return {
-          success: true,
-          message: `Already a member of ${existingGroup.name}`,
-          groupId: existingGroup.id,
-          groupName: existingGroup.name
-        };
-      }
-
-      // Check for inactive membership to reactivate
-      const inactiveMembership = await GroupMember.findOne({
-        where: {
-          group_id: existingGroup.id,
-          user_id: userId,
-          status: 'inactive'
+        if (existingMembership.status === 'active') {
+          console.log(`✅ User already active member of street group: ${streetGroup.name}`);
+          return {
+            success: true,
+            message: 'Already a member of this street group',
+            group: streetGroup
+          };
+        } else {
+          // Reactivate membership
+          await existingMembership.update({
+            status: 'active',
+            joined_at: new Date()
+          });
+          console.log(`✅ Reactivated membership for street group: ${streetGroup.name}`);
         }
-      });
-
-      if (inactiveMembership) {
-        await inactiveMembership.update({
+      } else {
+        // Create new membership
+        await GroupMember.create({
+          group_id: streetGroup.id,
+          user_id: userId,
+          role: 'member',
           status: 'active',
           joined_at: new Date()
         });
-
-        return {
-          success: true,
-          message: `Rejoined ${existingGroup.name}`,
-          groupId: existingGroup.id,
-          groupName: existingGroup.name
-        };
+        console.log(`✅ Added user to street group: ${streetGroup.name}`);
       }
 
-      // Create new membership
-      await GroupMember.create({
-        group_id: existingGroup.id,
-        user_id: userId,
-        role: 'member',
-        status: 'active',
-        joined_at: new Date()
-      });
-
       // Update member count
-      await existingGroup.update({
-        member_count: existingGroup.member_count + 1
+      await streetGroup.update({
+        member_count: streetGroup.member_count + 1
       });
 
       return {
         success: true,
-        message: `Successfully joined ${existingGroup.name}`,
-        groupId: existingGroup.id,
-        groupName: existingGroup.name
+        message: 'Successfully joined street group',
+        group: streetGroup
       };
 
     } catch (error) {
-      console.error('Error in autoJoinStreetGroup:', error);
+      console.error('Error auto-joining street group:', error);
       return {
         success: false,
         message: 'Failed to join street group',
@@ -1102,115 +1110,20 @@ class CityGroupService {
    */
   async getUserStreetGroupMemberships(userId) {
     try {
-      // First, let's check all memberships for this user
-      const allMemberships = await GroupMember.findAll({
-        where: {
-          user_id: userId
-        },
-        include: [
-          {
-            model: Group,
-            as: 'group',
-            attributes: ['id', 'name', 'category', 'status', 'location_json']
-          }
-        ]
-      });
-
-      // Check for inactive street group memberships that should be reactivated
-      const inactiveStreetMemberships = allMemberships.filter(m => 
-        m.group?.category === 'street' && 
-        m.group?.status === 'active' && 
-        m.status === 'inactive'
-      );
-
-      if (inactiveStreetMemberships.length > 0) {
-        // Get user's current location to check if they match
-        const { User } = await import('../models/index.js');
-        const user = await User.findByPk(userId);
-        
-        if (user) {
-          for (const membership of inactiveStreetMemberships) {
-            const groupLocation = membership.group.location_json || {};
-            
-            // Check if user's current location matches the group location
-            const normalizeString = (str) => str ? str.trim().toLowerCase() : '';
-            const userStreet = normalizeString(user.location_street);
-            const userCity = normalizeString(user.location_city);
-            const userState = normalizeString(user.location_state);
-            const userCountry = normalizeString(user.location_country);
-            
-            const groupStreet = normalizeString(groupLocation.street);
-            const groupCity = normalizeString(groupLocation.city);
-            const groupState = normalizeString(groupLocation.state);
-            const groupCountry = normalizeString(groupLocation.country);
-            
-            const isCurrentLocation = (
-              userStreet === groupStreet &&
-              userCity === groupCity &&
-              userState === groupState &&
-              userCountry === groupCountry
-            );
-            
-            if (isCurrentLocation) {
-              await membership.update({
-                status: 'active',
-                joined_at: new Date()
-              });
-              
-              // Update group member count
-              await membership.group.update({
-                member_count: membership.group.member_count + 1
-              });
-            } else {
-              // Check if street matches but other location fields are wrong - fix the group location
-              if (userStreet === groupStreet && userStreet !== '') {
-                // Update the group's location to match user's current location
-                await membership.group.update({
-                  location_json: {
-                    street: user.location_street,
-                    city: user.location_city,
-                    state: user.location_state,
-                    country: user.location_country,
-                    formattedAddress: `${user.location_street}, ${user.location_city}, ${user.location_state}, ${user.location_country}`,
-                    latitude: null,
-                    longitude: null
-                  }
-                });
-                
-                // Now reactivate the membership since location is fixed
-                await membership.update({
-                  status: 'active',
-                  joined_at: new Date()
-                });
-                
-                // Update group member count
-                await membership.group.update({
-                  member_count: membership.group.member_count + 1
-                });
-              } else {
-                // Fallback: If group location is empty but group name matches user's street, reactivate anyway
-                if (!groupLocation.street && !groupLocation.city && !groupLocation.state && !groupLocation.country) {
-                  const groupName = membership.group.name.toLowerCase();
-                  const userStreet = user.location_street?.toLowerCase() || '';
-                  
-                  if (groupName.includes(userStreet.replace(/\s+/g, ' ').trim())) {
-                    await membership.update({
-                      status: 'active',
-                      joined_at: new Date()
-                    });
-                    
-                    // Update group member count
-                    await membership.group.update({
-                      member_count: membership.group.member_count + 1
-                    });
-                  }
-                }
-              }
-            }
-          }
-        }
+      console.log(`🔍 Getting street group memberships for user: ${userId}`);
+      
+      // Get user's current location first
+      const { User } = await import('../models/index.js');
+      const user = await User.findByPk(userId);
+      
+      if (!user) {
+        console.log('❌ User not found');
+        return [];
       }
-
+      
+      console.log(`📍 User location: ${user.location_street}, ${user.location_city}, ${user.location_state}, ${user.location_country}`);
+      
+      // Get all active street group memberships for this user
       const memberships = await GroupMember.findAll({
         include: [
           {
@@ -1236,6 +1149,73 @@ class CityGroupService {
         }
       });
 
+      console.log(`✅ Found ${memberships.length} active street group memberships`);
+
+      // If no street groups found, try to auto-create and join one
+      if (memberships.length === 0 && user.location_city) {
+        console.log('🔄 No street groups found, attempting to auto-create...');
+        try {
+          await this.autoJoinStreetGroup(userId, user.location_street, user.location_city, user.location_state, user.location_country);
+          
+          // Try to get memberships again after auto-join
+          const newMemberships = await GroupMember.findAll({
+            include: [
+              {
+                model: Group,
+                as: 'group',
+                where: {
+                  category: 'street',
+                  status: 'active'
+                },
+                attributes: ['id', 'name', 'description', 'location_json', 'member_count', 'post_count', 'created_at', 'updated_at', 'created_by'],
+                include: [
+                  {
+                    model: User,
+                    as: 'creator',
+                    attributes: ['id', 'displayName', 'username', 'avatar_url']
+                  }
+                ]
+              }
+            ],
+            where: {
+              user_id: userId,
+              status: 'active'
+            }
+          });
+          
+          console.log(`✅ After auto-join, found ${newMemberships.length} street group memberships`);
+          
+          const result = newMemberships.map(membership => ({
+            id: membership.group.id,
+            name: membership.group.name,
+            description: membership.group.description,
+            category: 'street',
+            privacy: 'public',
+            memberCount: membership.group.member_count,
+            postCount: membership.group.post_count,
+            isJoined: true,
+            isAdmin: membership.role === 'admin',
+            isModerator: membership.role === 'moderator',
+            userRole: membership.role,
+            createdAt: membership.group.created_at || new Date(),
+            updatedAt: membership.group.updated_at || new Date(),
+            location: membership.group.location_json,
+            location_json: membership.group.location_json,
+            createdBy: {
+              id: membership.group.created_by,
+              displayName: membership.group.creator?.displayName || 'Unknown',
+              username: membership.group.creator?.username,
+              avatarUrl: membership.group.creator?.avatar_url
+            }
+          }));
+
+          console.log(`📋 Returning ${result.length} street groups:`, result.map(g => g.name));
+          return result;
+        } catch (autoJoinError) {
+          console.error('❌ Auto-join street group failed:', autoJoinError);
+        }
+      }
+
       const result = memberships.map(membership => ({
         id: membership.group.id,
         name: membership.group.name,
@@ -1260,8 +1240,10 @@ class CityGroupService {
         }
       }));
 
+      console.log(`📋 Returning ${result.length} street groups:`, result.map(g => g.name));
       return result;
     } catch (error) {
+      console.error('❌ Error getting street group memberships:', error);
       return [];
     }
   }
