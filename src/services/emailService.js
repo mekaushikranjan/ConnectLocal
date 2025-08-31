@@ -41,8 +41,8 @@ class EmailService {
           }
         });
 
-        // Verify connection configuration
-        this.verifyConnection();
+        // Verify connection configuration (will be verified when first email is sent)
+        // this.verifyConnection(); // Removed synchronous call to async method
       } else if (process.env.EMAIL_SERVICE === 'gmail' && process.env.GMAIL_APP_PASSWORD) {
         // Gmail OAuth2 setup
         this.transporter = nodemailer.createTransport({
@@ -102,6 +102,18 @@ class EmailService {
 
   async sendEmailWithRetry(to, subject, html, attachments = [], retryCount = 0) {
     try {
+      // Verify connection before sending (only for production SMTP)
+      if (process.env.NODE_ENV === 'production' && 
+          process.env.EMAIL_HOST && 
+          process.env.EMAIL_USER && 
+          process.env.EMAIL_PASS) {
+        try {
+          await this.verifyConnection();
+        } catch (error) {
+          console.warn('Email service verification failed, continuing with send attempt:', error.message);
+        }
+      }
+
       const mailOptions = {
         from: this.getFromAddress(),
         to,
@@ -118,8 +130,6 @@ class EmailService {
 
       const info = await this.transporter.sendMail(mailOptions);
         
-      return info;
-      
       return info;
     } catch (error) {
       if (retryCount < this.maxRetries && this.isRetryableError(error)) {
@@ -150,7 +160,20 @@ class EmailService {
     return `${fromName} <${fromAddress}>`;
   }
 
+  isEmailConfigured() {
+    return !!(this.transporter && 
+      (process.env.EMAIL_HOST || 
+       process.env.EMAIL_SERVICE || 
+       process.env.NODE_ENV !== 'production'));
+  }
+
   async sendEmail(to, subject, html, attachments = []) {
+    // Check if email service is properly configured
+    if (!this.transporter) {
+      console.warn('Email service not configured, skipping email send');
+      return { messageId: 'no-transporter' };
+    }
+    
     return this.sendEmailWithRetry(to, subject, html, attachments);
   }
 
