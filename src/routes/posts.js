@@ -142,20 +142,13 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
   }
 
           // Debug: Check what's being sent to frontend and ensure location fields are included
-    // Get accurate comment counts for each post
-    const postsWithCommentCounts = await Promise.all(posts.rows.map(async (post) => {
-      const commentCount = await Comment.count({
-        where: {
-          postId: post.id,
-          status: 'active'
-        }
-      });
-      
+    // Use the stored commentsCount field from the Post model
+    const postsWithCommentCounts = posts.rows.map((post) => {
       return {
         ...post.toJSON(),
-        commentsCount: commentCount
+        commentsCount: post.commentsCount || 0
       };
-    }));
+    });
 
     const serializedPosts = await Promise.all(postsWithCommentCounts.map(async (postData, index) => {
       const originalPost = posts.rows[index]; // Get the original Sequelize model instance
