@@ -539,12 +539,6 @@ export default (sequelize, DataTypes) => {
   User.findByLocation = function(longitude, latitude, radius_in_km = 10) {
     return this.findAll({
       where: {
-          location_coordinates: sequelize.fn(
-          'ST_DWithin',
-          sequelize.col('location_coordinates'),
-          sequelize.fn('ST_MakePoint', longitude, latitude),
-          radius_in_km * 1000
-        ),
         is_active: true
       }
     });

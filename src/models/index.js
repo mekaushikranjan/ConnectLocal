@@ -126,7 +126,7 @@ const defineAssociations = () => {
   JobApplication.hasMany(Notification, { foreignKey: 'application_id' });
 
   // MarketplaceItem associations
-  MarketplaceItem.belongsTo(User, { foreignKey: 'seller_id', as: 'seller' });
+  MarketplaceItem.belongsTo(User, { foreignKey: 'seller_id', as: 'User' });
   MarketplaceItem.hasMany(Notification, { foreignKey: 'marketplace_item_id' });
 
   // Chat associations
@@ -140,13 +140,9 @@ const defineAssociations = () => {
   LiveChat.belongsTo(User, { foreignKey: 'admin_id', as: 'admin' });
   LiveChat.hasMany(LiveChatMessage, { foreignKey: 'session_id', as: 'messages' });
 
-  // LiveChatMessage associations
-  LiveChatMessage.belongsTo(User, { foreignKey: 'sender_id', as: 'sender' });
-  LiveChatMessage.belongsTo(LiveChat, { foreignKey: 'session_id', as: 'session' });
+
 
   // Message associations
-  Message.belongsTo(User, { foreignKey: 'sender_id', as: 'sender' });
-  Message.belongsTo(Chat, { foreignKey: 'chat_id', as: 'chat' });
   Message.hasMany(Notification, { foreignKey: 'message_id' });
 
   // Notification associations - add all the foreign key references
@@ -161,10 +157,12 @@ const defineAssociations = () => {
   Notification.belongsTo(Message, { foreignKey: 'message_id' });
 
   // Report associations
-  Report.belongsTo(User, { foreignKey: 'reporter_id', as: 'reporter' });
+  Report.belongsTo(User, { foreignKey: 'reported_by', as: 'reporter' });
 
-  // SupportTicket associations
-  SupportTicket.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+  // ModerationLog associations
+  User.hasMany(ModerationLog, { foreignKey: 'moderatorId', as: 'moderationActions' });
+
+  // SupportTicket associations - handled in SupportTicket.associate()
 
   // Privacy and safety associations
   User.hasOne(PrivacySettings, { foreignKey: 'user_id', as: 'privacySettings' });
@@ -194,6 +192,14 @@ const defineAssociations = () => {
 
 // Initialize associations
 defineAssociations();
+
+// Call individual model associate functions
+Message.associate({ User, Chat, Message });
+LiveChatMessage.associate({ User, LiveChat, LiveChatMessage });
+ModerationLog.associate({ User, Post, Comment, Job, MarketplaceItem, Report });
+SupportTicket.associate({ User });
+
+
 
 // Database sync function
 const syncDatabase = async (force = false) => {

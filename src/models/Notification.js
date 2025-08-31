@@ -49,11 +49,11 @@ export default (sequelize) => {
     type: {
       type: DataTypes.ENUM(
         // Post-related
-        'post_like', 'post_comment', 'post_share', 'post_mention',
+        'post_like', 'post_comment', 'post_share', 'post_mention', 'comment_like',
         
         // Job-related
         'job_match', 'job_application', 'job_application_status',
-        'job_interview_scheduled', 'job_offer',
+        'job_interview_scheduled', 'job_offer', 'application_submitted', 'application_status_update',
         
         // Marketplace-related
         'marketplace_inquiry', 'marketplace_favorite', 'marketplace_sold',
@@ -67,7 +67,7 @@ export default (sequelize) => {
         
         // System-related
         'system_update', 'maintenance', 'security_alert',
-        'account_verification', 'password_reset',
+        'account_verification', 'password_reset', 'account_update',
         
         // Community-related
         'community_invite', 'community_event', 'community_announcement',
@@ -329,121 +329,204 @@ export default (sequelize) => {
 
   // Static methods
   Notification.createNotification = async function(notificationData) {
-    const {
-      recipientId,
-      senderId,
-      title,
-      message,
-      type,
-      customData = {},
-      priority = 'normal',
-      actionUrl,
-      actionText,
-      groupKey,
-      scheduledFor,
-      expiresAt
-    } = notificationData;
-    
-    // Check if we should group this notification
-    if (groupKey) {
-      const existingNotification = await this.findOne({
-        where: {
-          recipientId,
-          groupKey,
-          status: 'unread',
-          created_at: { [Op.gte]: new Date(Date.now() - 24 * 60 * 60 * 1000) } // Within last 24 hours
-        }
-      });
+    try {
+      const {
+        recipientId,
+        senderId,
+        title,
+        message,
+        type,
+        customData = {},
+        priority = 'normal',
+        actionUrl,
+        actionText,
+        groupKey,
+        scheduledFor,
+        expiresAt
+      } = notificationData;
       
-      if (existingNotification) {
-        existingNotification.groupCount += 1;
-        existingNotification.message = message; // Update with latest message
-        existingNotification.changed('updatedAt', true); // Force timestamp update
-        return await existingNotification.save();
+      // Check if we should group this notification
+      if (groupKey) {
+        const existingNotification = await this.findOne({
+          where: {
+            recipientId,
+            groupKey,
+            status: 'unread',
+            created_at: { [Op.gte]: new Date(Date.now() - 24 * 60 * 60 * 1000) } // Within last 24 hours
+          }
+        });
+        
+        if (existingNotification) {
+          existingNotification.groupCount += 1;
+          existingNotification.message = message; // Update with latest message
+          existingNotification.changed('updatedAt', true); // Force timestamp update
+          const updatedNotification = await existingNotification.save();
+          
+          // Invalidate cache after update
+          const RedisService = (await import('../services/redisService.js')).default;
+          await RedisService.invalidateUserData(recipientId);
+          
+          return updatedNotification;
+        }
       }
+      
+      // Create new notification
+      const notification = await this.create({
+        recipientId,
+        senderId,
+        title,
+        message,
+        type,
+        customData,
+        priority,
+        actionUrl,
+        actionText,
+        groupKey,
+        scheduledFor,
+        expiresAt,
+        isScheduled: !!scheduledFor
+      });
+
+      // Invalidate cache after creation
+      const RedisService = (await import('../services/redisService.js')).default;
+      await RedisService.invalidateUserData(recipientId);
+      
+      // Update unread count
+      const newCount = await this.getUnreadCount(recipientId, false);
+      await RedisService.setUnreadCount(recipientId, newCount);
+
+      return notification;
+    } catch (error) {
+      console.error('Error creating notification:', error);
+      throw error;
     }
-    
-    // Create new notification
-    return await this.create({
-      recipientId,
-      senderId,
-      title,
-      message,
-      type,
-      customData,
-      priority,
-      actionUrl,
-      actionText,
-      groupKey,
-      scheduledFor,
-      expiresAt,
-      isScheduled: !!scheduledFor
-    });
   };
 
   Notification.getUserNotifications = async function(userId, options = {}) {
-    const where = {
-      recipientId: userId
-    };
+    const { useCache = true } = options;
     
-    if (options.status) {
-      where.status = options.status;
+    try {
+      // Try to get from cache first
+      if (useCache) {
+        const RedisService = (await import('../services/redisService.js')).default;
+        const cachedNotifications = await RedisService.getCachedNotifications(userId);
+        if (cachedNotifications) {
+
+          return cachedNotifications;
+        }
+      }
+
+      const where = {
+        recipientId: userId
+      };
+      
+      if (options.status) {
+        where.status = options.status;
+      }
+      
+      if (options.type) {
+        where.type = options.type;
+      }
+      
+      if (options.priority) {
+        where.priority = options.priority;
+      }
+      
+      // Exclude expired notifications
+      where[Op.or] = [
+        { expiresAt: null },
+        { expiresAt: { [Op.gt]: new Date() } }
+      ];
+      
+      const notifications = await this.findAll({
+        where,
+        include: [{
+          model: sequelize.models.User,
+          as: 'sender',
+          attributes: ['displayName', 'username', 'avatar_url']
+        }],
+        order: [['created_at', 'DESC']],
+        limit: options.limit,
+        offset: options.skip
+      });
+
+      // Cache the results
+      if (useCache) {
+        const RedisService = (await import('../services/redisService.js')).default;
+        await RedisService.cacheNotifications(userId, notifications);
+      }
+      
+      return notifications;
+    } catch (error) {
+      console.error('Error getting user notifications:', error);
+      throw error;
     }
-    
-    if (options.type) {
-      where.type = options.type;
-    }
-    
-    if (options.priority) {
-      where.priority = options.priority;
-    }
-    
-    // Exclude expired notifications
-    where[Op.or] = [
-      { expiresAt: null },
-      { expiresAt: { [Op.gt]: new Date() } }
-    ];
-    
-    return await this.findAll({
-      where,
-      include: [{
-        model: sequelize.models.User,
-        as: 'sender',
-        attributes: ['displayName', 'username', 'profileAvatar']
-      }],
-      order: [['created_at', 'DESC']],
-      limit: options.limit,
-      offset: options.skip
-    });
   };
 
-  Notification.getUnreadCount = async function(userId) {
-    return await this.count({
-      where: {
-        recipientId: userId,
-        status: 'unread',
-        [Op.or]: [
-          { expiresAt: null },
-          { expiresAt: { [Op.gt]: new Date() } }
-        ]
+  Notification.getUnreadCount = async function(userId, useCache = true) {
+    try {
+      // Try to get from cache first
+      if (useCache) {
+        const RedisService = (await import('../services/redisService.js')).default;
+        const cachedCount = await RedisService.getUnreadCount(userId);
+        if (cachedCount !== null) {
+          return cachedCount;
+        }
       }
-    });
+
+      const count = await this.count({
+        where: {
+          recipientId: userId,
+          status: 'unread',
+          [Op.or]: [
+            { expiresAt: null },
+            { expiresAt: { [Op.gt]: new Date() } }
+          ]
+        }
+      });
+
+      // Cache the count
+      if (useCache) {
+        const RedisService = (await import('../services/redisService.js')).default;
+        await RedisService.setUnreadCount(userId, count);
+      }
+
+      return count;
+    } catch (error) {
+      console.error('Error getting unread count:', error);
+      return 0;
+    }
   };
 
   Notification.markAllAsRead = async function(userId) {
-    const now = new Date();
-    return await this.update(
-      {
-        status: 'read',
-        readAt: now
-      },
-      {
-        where: {
-          recipientId: userId,
-          status: 'unread'
+    try {
+      const now = new Date();
+      const result = await this.update(
+        {
+          status: 'read',
+          readAt: now
+        },
+        {
+          where: {
+            recipientId: userId,
+            status: 'unread'
+          }
         }
-      }
-    );
+      );
+
+      // Invalidate cache
+      const RedisService = (await import('../services/redisService.js')).default;
+      await RedisService.invalidateUserData(userId);
+      
+      // Update unread count
+      const newCount = await this.getUnreadCount(userId, false);
+      await RedisService.setUnreadCount(userId, newCount);
+
+      return result;
+    } catch (error) {
+      console.error('Error marking notifications as read:', error);
+      throw error;
+    }
   };
 
   Notification.getScheduledNotifications = async function() {

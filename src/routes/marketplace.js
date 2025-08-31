@@ -3,6 +3,8 @@ import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { MarketplaceItem, User, Notification } from '../models/index.js';
 import { Op } from 'sequelize';
+import NotificationService from '../services/notificationService.js';
+import { getIO } from '../socket/socketHandler.js';
 
 const router = express.Router();
 
@@ -14,25 +16,25 @@ const transformItemForFrontend = (item) => {
     id: item.id,
     title: item.title,
     description: item.description,
-    price: item.price?.amount || 0,
-    currency: item.price?.currency || 'INR',
-    negotiable: item.price?.negotiable || true,
+    price: item.price_jsonb?.amount || 0,
+    currency: item.price_jsonb?.currency || 'INR',
+    negotiable: item.price_jsonb?.negotiable || true,
     category: item.category,
-    condition: item.condition,
-    images: item.images || [],
+    condition: item.condition_jsonb,
+    images: item.images_jsonb || [],
     specifications: item.specifications || {},
     location: {
-      city: item.locationAddress?.city,
-      state: item.locationAddress?.state,
-      country: item.locationAddress?.country,
-      formattedAddress: item.locationAddress?.formattedAddress
+      city: item.location_address?.city,
+      state: item.location_address?.state,
+      country: item.location_address?.country,
+      formattedAddress: item.location_address?.formattedAddress
     },
     seller: {
-      id: item.sellerId,
-      displayName: item.User?.displayName || item.seller?.displayName,
-      username: item.User?.username || item.seller?.username,
-      avatarUrl: item.User?.avatar_url || item.seller?.avatar_url,
-      rating: item.User?.rating_average || item.seller?.rating_average
+      id: item.seller_id,
+      displayName: item.User?.displayName,
+      username: item.User?.username,
+      avatarUrl: item.User?.avatar_url,
+      rating: parseFloat(item.User?.rating_average) || 0
     },
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -199,22 +201,26 @@ router.post('/', authenticate, asyncHandler(async (req, res) => {
   // Fix condition format (replace underscores with hyphens)
   const normalizedCondition = condition?.replace(/_/g, '-') || 'good';
 
+
+
   const item = await MarketplaceItem.create({
-    sellerId: req.user.id,
+    seller_id: req.user.id,
     title,
     description,
-    price: priceData,
+    price_jsonb: priceData,
     category: category?.toLowerCase(),
-    condition: normalizedCondition,
-    locationAddress,
-    images: images || [],
+    condition_jsonb: normalizedCondition,
+    location_address: locationAddress,
+    images_jsonb: images || [],
     specifications: specifications || {}
   });
+
+
 
   const populatedItem = await MarketplaceItem.findByPk(item.id, {
     include: [{
       model: User,
-      as: 'seller',
+      as: 'User',
       attributes: ['id', 'displayName', 'username', 'avatar_url', 'rating_average']
     }]
   });
@@ -257,16 +263,16 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
   }
 
   if (category) whereClause.category = category;
-  if (condition) whereClause.condition = condition;
-  if (location) whereClause.location = location;
+  if (condition) whereClause.condition_jsonb = condition;
+  if (location) whereClause.location_address = location;
 
   if (minPrice || maxPrice) {
     if (minPrice) {
-      whereClause['price.amount'] = { [Op.gte]: parseInt(minPrice) };
+      whereClause['price_jsonb.amount'] = { [Op.gte]: parseInt(minPrice) };
     }
     if (maxPrice) {
-      whereClause['price.amount'] = { 
-        ...whereClause['price.amount'], 
+      whereClause['price_jsonb.amount'] = { 
+        ...whereClause['price_jsonb.amount'], 
         [Op.lte]: parseInt(maxPrice) 
       };
     }
@@ -276,7 +282,7 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
     where: whereClause,
     include: [{
       model: User,
-      as: 'seller',
+      as: 'User',
       attributes: ['id', 'displayName', 'username', 'avatar_url', 'rating_average']
     }],
     limit: parseInt(limit),
@@ -307,7 +313,7 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
   const item = await MarketplaceItem.findByPk(req.params.id, {
     include: [{
       model: User,
-      as: 'seller',
+      as: 'User',
       attributes: ['id', 'displayName', 'username', 'avatar_url', 'rating_average']
     }]
   });
@@ -432,6 +438,29 @@ router.post('/:id/favorite', authenticate, asyncHandler(async (req, res) => {
     });
   } else {
     await item.addFavoritedBy(req.user);
+    
+    // Send notification to seller about new favorite
+    try {
+      await NotificationService.notifyMarketplaceFavorite(req.user.id, item.id);
+
+      // Emit socket notification
+      const io = getIO();
+      if (io && item.seller_id !== req.user.id) {
+        io.to(item.seller_id).emit('notification', {
+          type: 'marketplace_favorite',
+          title: 'Item Favorited',
+          message: `${req.user.displayName || req.user.username} added your item to favorites`,
+          customData: {
+            itemId: item.id,
+            itemTitle: item.title,
+            favoriterName: req.user.displayName || req.user.username
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error sending marketplace favorite notification:', error);
+    }
+
     res.json({
       success: true,
       message: 'Item added to favorites'

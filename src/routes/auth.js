@@ -193,7 +193,8 @@ router.post('/register', asyncHandler(async (req, res) => {
     title: 'Welcome to LocalConnect!',
     message: 'Welcome to our community! Start by completing your profile and connecting with neighbors.',
     type: 'system_update',
-    priority: 'normal'
+    priority: 'normal',
+    groupKey: `welcome_${user.id}`
   });
 
   res.status(201).json({
@@ -316,12 +317,10 @@ router.post('/register', asyncHandler(async (req, res) => {
  */
 router.post('/login', asyncHandler(async (req, res) => {
   const { email, password, deviceInfo } = req.body;
-
   // Find user by email
   const user = await User.findOne({ 
     where: { email: email.toLowerCase() }
   });
-
   if (!user) {
     return res.status(401).json({
       success: false,
@@ -483,7 +482,7 @@ router.post('/login', asyncHandler(async (req, res) => {
         displayName: user.displayName,
         firstName: user.firstName,
         lastName: user.lastName,
-        bio: user.bio,
+        bio: user.bio_text,
         avatarUrl: user.avatarUrl,
         coverImageUrl: user.coverImageUrl,
         phoneNumber: user.phoneNumber,
@@ -912,6 +911,25 @@ router.post('/logout', authenticate, asyncHandler(async (req, res) => {
  * @access  Private
  */
 router.get('/me', authenticate, asyncHandler(async (req, res) => {
+  const { Post, Connection } = await import('../models/index.js');
+  const { Op } = await import('sequelize');
+  
+  // Get counts
+  const postsCount = await Post.count({ where: { author_id: req.user.id, status: 'active' } });
+  
+  // Get friends count (accepted connections)
+  const friendsCount = await Connection.count({
+    where: {
+      [Op.or]: [
+        { user_id1: req.user.id, status: 'accepted' },
+        { user_id2: req.user.id, status: 'accepted' }
+      ]
+    }
+  });
+  
+  // For now, set followers and following to 0 (can be implemented later with a separate followers system)
+  const followersCount = 0;
+  const followingCount = 0;
   
   res.json({
     success: true,
@@ -933,7 +951,7 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
         locationCity: req.user.location_city,
         locationState: req.user.location_state,
         locationCountry: req.user.location_country,
-        locationDistrict: req.user.location_district,
+
         shareLocation: req.user.share_location,
         profileVisibility: req.user.profile_visibility,
         gender: req.user.gender_type,
@@ -945,6 +963,10 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
         interests: req.user.interests_array,
         skills: req.user.skills_array,
         socialLinks: req.user.social_links,
+        postsCount,
+        followersCount,
+        followingCount,
+        friendsCount,
         createdAt: req.user.createdAt,
         last_login: req.user.last_login,
         last_active: req.user.last_active
@@ -1262,7 +1284,8 @@ router.post('/verify-email', asyncHandler(async (req, res) => {
     title: 'Email Verified!',
     message: 'Your email has been successfully verified. You now have full access to all features.',
     type: 'account_verification',
-    priority: 'normal'
+    priority: 'normal',
+    groupKey: `email_verified_${user.id}`
   });
 
   // Send welcome email after successful verification
@@ -1802,7 +1825,8 @@ router.put('/change-password', authenticate, asyncHandler(async (req, res) => {
     title: 'Password Changed',
     message: 'Your password has been successfully changed. If this wasn\'t you, please contact support immediately.',
     type: 'security_alert',
-    priority: 'high'
+    priority: 'high',
+    groupKey: `password_changed_${req.user.id}`
   });
 
   res.json({
@@ -1966,7 +1990,8 @@ router.post('/verify-phone', authenticate, asyncHandler(async (req, res) => {
     title: 'Phone Number Verified',
     message: `Your phone number ${req.user.phone_number} has been successfully verified.`,
     type: 'account_update',
-    priority: 'normal'
+    priority: 'normal',
+    groupKey: `phone_verified_${req.user.id}`
   });
 
   res.json({
@@ -2106,7 +2131,8 @@ router.post('/reset-password-sms', asyncHandler(async (req, res) => {
     title: 'Password Reset via SMS',
     message: 'Your password has been reset via SMS verification. If this wasn\'t you, please contact support immediately.',
     type: 'security_alert',
-    priority: 'high'
+    priority: 'high',
+    groupKey: `password_reset_sms_${user.id}`
   });
 
   res.json({

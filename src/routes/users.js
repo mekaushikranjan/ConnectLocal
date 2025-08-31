@@ -28,18 +28,146 @@ router.get('/profile/:username', asyncHandler(async (req, res) => {
         id: user.id,
         displayName: user.displayName,
         username: user.username,
-        bio: user.bio,
+        bio: user.bio_text,
         avatarUrl: user.avatarUrl,
         coverImageUrl: user.coverImageUrl,
         locationCity: user.locationCity,
         locationState: user.locationState,
         locationCountry: user.locationCountry,
+        locationStreet: user.locationStreet,
         profileVisibility: user.profileVisibility,
         postsCount: user.postsCount,
         followersCount: user.followersCount,
         followingCount: user.followingCount,
         createdAt: user.createdAt
       }
+    }
+  });
+}));
+
+/**
+ * @route   GET /api/users/search
+ * @desc    Search users
+ * @access  Private
+ */
+router.get('/search', authenticate, asyncHandler(async (req, res) => {
+  const { q: query, location, limit = 20, page = 1 } = req.query;
+  const offset = (page - 1) * limit;
+  const currentUserId = req.user.id;
+
+  const whereClause = {
+    // Exclude current user
+    id: { [Op.ne]: currentUserId },
+    // Only show active users
+    status: 'active'
+  };
+
+  if (query) {
+    whereClause[Op.or] = [
+      { username: { [Op.iLike]: `%${query}%` } },
+      { displayName: { [Op.iLike]: `%${query}%` } },
+      { first_name: { [Op.iLike]: `%${query}%` } },
+      { last_name: { [Op.iLike]: `%${query}%` } }
+    ];
+  }
+
+  if (location) {
+    whereClause[Op.or] = [
+      { location_city: { [Op.iLike]: `%${location}%` } },
+      { location_state: { [Op.iLike]: `%${location}%` } },
+      { location_country: { [Op.iLike]: `%${location}%` } },
+      { location_street: { [Op.iLike]: `%${location}%` } }
+    ];
+  }
+
+  const users = await User.findAndCountAll({
+    where: whereClause,
+    limit: parseInt(limit),
+    offset: parseInt(offset),
+    order: [['createdAt', 'DESC']],
+    attributes: [
+      'id', 'email', 'displayName', 'first_name', 'last_name', 
+      'bio_text', 'avatar_url', 'cover_image_url', 'phone_number', 
+      'phone_verified', 'email_verified', 'role', 'status',
+      'location_city', 'location_state', 'location_country', 'location_street',
+      'share_location', 'profile_visibility', 'occupation', 'company', 
+      'education', 'gender_type', 'date_of_birth', 'relationship_status',
+      'interests_array', 'skills_array', 'social_links', 'createdAt', 
+      'last_login', 'last_active'
+    ]
+  });
+
+  res.json({
+    success: true,
+    data: {
+      users: await Promise.all(users.rows.map(async (user) => {
+        // Check connection status for each user
+        const connection = await Connection.findConnection(currentUserId, user.id);
+        let connectionStatus = 'none';
+        let friendRequestSent = false;
+        let friendRequestReceived = false;
+        let isFriend = false;
+
+        if (connection) {
+          if (connection.status === 'accepted') {
+            connectionStatus = 'connected';
+            isFriend = true;
+          } else if (connection.status === 'pending') {
+            if (connection.user_id1 === currentUserId) {
+              connectionStatus = 'sent';
+              friendRequestSent = true;
+            } else {
+              connectionStatus = 'received';
+              friendRequestReceived = true;
+            }
+          }
+        }
+
+        return {
+          id: user.id,
+          email: user.email,
+          displayName: user.displayName,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          username: user.username,
+          bio: user.bio_text,
+          avatarUrl: user.avatar_url,
+          coverImageUrl: user.cover_image_url,
+          phoneNumber: user.phone_number,
+          phoneVerified: user.phone_verified,
+          emailVerified: user.email_verified,
+          role: user.role,
+          status: user.status,
+          locationCity: user.location_city,
+          locationState: user.location_state,
+          locationCountry: user.location_country,
+          locationStreet: user.location_street,
+
+          shareLocation: user.share_location,
+          profileVisibility: user.profile_visibility,
+          occupation: user.occupation,
+          company: user.company,
+          education: user.education,
+          gender: user.gender_type,
+          dateOfBirth: user.date_of_birth,
+          relationshipStatus: user.relationship_status,
+          interests: user.interests_array,
+          skills: user.skills_array,
+          socialLinks: user.social_links,
+          createdAt: user.createdAt,
+          lastLogin: user.last_login,
+          lastActive: user.last_active,
+          
+          // Connection status fields
+          friendRequestSent,
+          friendRequestReceived,
+          isFriend,
+          connectionStatus
+        };
+      })),
+      total: users.count,
+      page: parseInt(page),
+      totalPages: Math.ceil(users.count / limit)
     }
   });
 }));
@@ -58,7 +186,7 @@ router.get('/:userId', authenticate, asyncHandler(async (req, res) => {
       'id', 'email', 'displayName', 'first_name', 'last_name', 
       'bio_text', 'avatar_url', 'cover_image_url', 'phone_number', 
       'phone_verified', 'email_verified', 'role', 'status',
-      'location_city', 'location_state', 'location_country', 'location_district',
+      'location_city', 'location_state', 'location_country', 'location_street',
       'share_location', 'profile_visibility', 'occupation', 'company', 
       'education', 'gender_type', 'date_of_birth', 'relationship_status',
       'interests_array', 'skills_array', 'social_links', 'createdAt', 
@@ -150,7 +278,8 @@ router.get('/:userId', authenticate, asyncHandler(async (req, res) => {
         locationCity: user.location_city,
         locationState: user.location_state,
         locationCountry: user.location_country,
-        locationDistrict: user.location_district,
+        locationStreet: user.location_street,
+
         shareLocation: user.share_location,
         profileVisibility: user.profile_visibility,
         occupation: user.occupation,
@@ -178,44 +307,7 @@ router.get('/:userId', authenticate, asyncHandler(async (req, res) => {
   });
 }));
 
-/**
- * @route   GET /api/users/search
- * @desc    Search users
- * @access  Private
- */
-router.get('/search', authenticate, asyncHandler(async (req, res) => {
-  const { query, location, limit = 10, page = 1 } = req.query;
-  const offset = (page - 1) * limit;
 
-  const whereClause = {};
-  if (query) {
-    whereClause[Op.or] = [
-      { username: { [Op.iLike]: `%${query}%` } },
-      { displayName: { [Op.iLike]: `%${query}%` } }
-    ];
-  }
-
-  if (location) {
-    whereClause.location = location;
-  }
-
-  const users = await User.findAndCountAll({
-    where: whereClause,
-    limit: parseInt(limit),
-    offset: parseInt(offset),
-    order: [['createdAt', 'DESC']]
-  });
-
-  res.json({
-    success: true,
-    data: {
-      users: users.rows.map(user => user.getPublicProfile()),
-      total: users.count,
-      page: parseInt(page),
-      totalPages: Math.ceil(users.count / limit)
-    }
-  });
-}));
 
 /**
  * @route   PUT /api/users/profile
@@ -232,7 +324,8 @@ router.put('/profile', authenticate, asyncHandler(async (req, res) => {
     locationCity,
     locationState,
     locationCountry,
-    locationDistrict,
+    locationStreet,
+
     occupation,
     company,
     education,
@@ -269,9 +362,10 @@ router.put('/profile', authenticate, asyncHandler(async (req, res) => {
   if (locationCountry !== undefined && locationCountry !== '' && locationCountry !== user.location_country) {
     updateData.location_country = locationCountry;
   }
-  if (locationDistrict !== undefined && locationDistrict !== '' && locationDistrict !== user.location_district) {
-    updateData.location_district = locationDistrict;
+  if (locationStreet !== undefined && locationStreet !== '' && locationStreet !== user.location_street) {
+    updateData.location_street = locationStreet;
   }
+
   
   if (occupation !== undefined && occupation !== '') updateData.occupation = occupation;
   if (company !== undefined && company !== '') updateData.company = company;
@@ -318,7 +412,8 @@ router.put('/profile', authenticate, asyncHandler(async (req, res) => {
         locationCity: user.location_city,
         locationState: user.location_state,
         locationCountry: user.location_country,
-        locationDistrict: user.location_district,
+        locationStreet: user.location_street,
+
         shareLocation: user.share_location,
         profileVisibility: user.profile_visibility,
         occupation: user.occupation,

@@ -26,6 +26,29 @@ export default (sequelize, DataTypes) => {
       }
     },
     
+    // Applicant Details
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      validate: {
+        len: [1, 100]
+      }
+    },
+    email: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      validate: {
+        isEmail: true
+      }
+    },
+    mobile: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      validate: {
+        len: [10, 15]
+      }
+    },
+    
     // Application Details
     coverLetter: {
       type: DataTypes.TEXT,

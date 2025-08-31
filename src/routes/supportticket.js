@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { isAdmin, isStaff } from '../middleware/roleAuth.js';
 import { SupportTicket, User, sequelize } from '../models/index.js';
 import { Op } from 'sequelize';
 
@@ -43,14 +44,7 @@ router.post('/create', authenticate, asyncHandler(async (req, res) => {
  * @desc    Get support tickets (admin/moderator only)
  * @access  Private (Admin/Moderator)
  */
-router.get('/tickets', authenticate, asyncHandler(async (req, res) => {
-  // Check if user is admin or moderator
-  if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
-    return res.status(403).json({
-      success: false,
-      message: 'Access denied. Admin or moderator privileges required.'
-    });
-  }
+router.get('/tickets', authenticate, isStaff, asyncHandler(async (req, res) => {
 
   const { status, priority, type, page = 1, limit = 20 } = req.query;
   const offset = (page - 1) * limit;
@@ -101,14 +95,7 @@ router.get('/tickets', authenticate, asyncHandler(async (req, res) => {
  * @desc    Get specific support ticket (admin/moderator only)
  * @access  Private (Admin/Moderator)
  */
-router.get('/tickets/:id', authenticate, asyncHandler(async (req, res) => {
-  // Check if user is admin or moderator
-  if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
-    return res.status(403).json({
-      success: false,
-      message: 'Access denied. Admin or moderator privileges required.'
-    });
-  }
+router.get('/tickets/:id', authenticate, isStaff, asyncHandler(async (req, res) => {
 
   const ticket = await SupportTicket.findByPk(req.params.id, {
     include: [
@@ -143,14 +130,7 @@ router.get('/tickets/:id', authenticate, asyncHandler(async (req, res) => {
  * @desc    Update ticket status and response (admin/moderator only)
  * @access  Private (Admin/Moderator)
  */
-router.put('/tickets/:id', authenticate, asyncHandler(async (req, res) => {
-  // Check if user is admin or moderator
-  if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
-    return res.status(403).json({
-      success: false,
-      message: 'Access denied. Admin or moderator privileges required.'
-    });
-  }
+router.put('/tickets/:id', authenticate, isStaff, asyncHandler(async (req, res) => {
 
   const { status, response, priority } = req.body;
   const ticket = await SupportTicket.findByPk(req.params.id);
@@ -261,14 +241,7 @@ router.get('/my-tickets/:id', authenticate, asyncHandler(async (req, res) => {
  * @desc    Delete ticket (admin only)
  * @access  Private (Admin only)
  */
-router.delete('/tickets/:id', authenticate, asyncHandler(async (req, res) => {
-  // Check if user is admin
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({
-      success: false,
-      message: 'Access denied. Admin privileges required.'
-    });
-  }
+router.delete('/tickets/:id', authenticate, isStaff, asyncHandler(async (req, res) => {
 
   const ticket = await SupportTicket.findByPk(req.params.id);
 
@@ -292,14 +265,7 @@ router.delete('/tickets/:id', authenticate, asyncHandler(async (req, res) => {
  * @desc    Get support ticket statistics (admin/moderator only)
  * @access  Private (Admin/Moderator)
  */
-router.get('/stats', authenticate, asyncHandler(async (req, res) => {
-  // Check if user is admin or moderator
-  if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
-    return res.status(403).json({
-      success: false,
-      message: 'Access denied. Admin or moderator privileges required.'
-    });
-  }
+  router.get('/stats', authenticate, isStaff, asyncHandler(async (req, res) => {
 
   const totalTickets = await SupportTicket.count();
   const openTickets = await SupportTicket.count({ where: { status: 'open' } });

@@ -3,8 +3,13 @@ import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { Post, Comment, User, Notification } from '../models/index.js';
 import { Op } from 'sequelize';
+import { sequelize } from '../config/database.js';
 import { validateComment } from '../middleware/validation.js';
 import ScheduledPostsService from '../services/scheduledPostsService.js';
+import { parseFormattedAddress } from '../utils/locationUtils.js';
+import NotificationService from '../services/notificationService.js';
+import { getIO } from '../socket/socketHandler.js';
+import RedisService from '../services/redisService.js';
 
 const router = express.Router();
 
@@ -56,8 +61,21 @@ const router = express.Router();
  *         $ref: '#/components/responses/ServerError'
  */
 router.get('/', authenticate, asyncHandler(async (req, res) => {
-  const { type, location, limit = 10, page = 1 } = req.query;
-  const offset = (page - 1) * limit;
+  try {
+    const { type, location, feedType, limit = 10, page = 1, useCache = 'true' } = req.query;
+    const offset = (page - 1) * limit;
+    
+    // Try to get from cache first (temporarily disabled for debugging)
+    if (useCache === 'true' && false) { // Disabled cache temporarily
+      const cacheKey = `posts_feed_${req.user.id}_${type || 'all'}_${feedType || 'all'}_${page}_${limit}`;
+      const cachedPosts = await RedisService.getCachedPostsFeed(cacheKey);
+      if (cachedPosts) {
+        return res.json({
+          success: true,
+          data: cachedPosts
+        });
+      }
+    }
 
   const whereClause = {
     [Op.or]: [
@@ -67,7 +85,39 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
   };
 
   if (type) whereClause.type = type;
-  if (location) whereClause.location = location;
+  
+  // Enhanced location filtering based on feed type
+  if (feedType === 'micro') {
+    // For micro feed, show posts from the same street AND city
+    const microFeedConditions = [];
+    
+    // Must have both street and city for micro feed
+    if (req.user.location_street && req.user.location_city) {
+      microFeedConditions.push({
+        [Op.and]: [
+          { location_street: req.user.location_street },
+          { location_city: req.user.location_city }
+        ]
+      });
+    }
+    
+    // If we have both street and city conditions, add them to the where clause
+    if (microFeedConditions.length > 0) {
+      whereClause[Op.and] = [
+        ...(whereClause[Op.and] || []),
+        { [Op.or]: microFeedConditions }
+      ];
+    }
+  } else if (feedType === 'city' && req.user.location_city) {
+    // For city feed, show posts from the same city
+    whereClause[Op.and] = [
+      ...(whereClause[Op.and] || []),
+      { [Op.or]: [{ location_city: req.user.location_city }] }
+    ];
+  } else if (location) {
+    // Fallback to simple location filtering
+    whereClause.location = location;
+  }
 
   const posts = await Post.findAndCountAll({
     where: whereClause,
@@ -78,20 +128,129 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
         attributes: ['id', 'displayName', 'username', 'avatar_url']
       }
     ],
+    // Don't specify attributes to include all fields by default
     limit: parseInt(limit),
     offset: parseInt(offset),
     order: [['createdAt', 'DESC']]
   });
 
+  // Debug: Log the first post to see what location data we have
+  if (posts.rows.length > 0) {
+    const firstPost = posts.rows[0].toJSON();
+    
+    // Also log the raw Sequelize instance
+  }
+
+          // Debug: Check what's being sent to frontend and ensure location fields are included
+    // Get accurate comment counts for each post
+    const postsWithCommentCounts = await Promise.all(posts.rows.map(async (post) => {
+      const commentCount = await Comment.count({
+        where: {
+          postId: post.id,
+          status: 'active'
+        }
+      });
+      
+      return {
+        ...post.toJSON(),
+        commentsCount: commentCount
+      };
+    }));
+
+    const serializedPosts = await Promise.all(postsWithCommentCounts.map(async (postData, index) => {
+      const originalPost = posts.rows[index]; // Get the original Sequelize model instance
+      
+      // Calculate reactions count from the JSONB reactions field
+      let reactions = postData.reactions || {};
+      
+      // If reactions is a string, try to parse it as JSON
+      if (typeof reactions === 'string') {
+        try {
+          reactions = JSON.parse(reactions);
+        } catch (e) {
+          reactions = {};
+        }
+      }
+      
+      // Calculate likes count only (not total reactions)
+      const likesCount = (reactions.likes || []).length;
+      const heartsCount = (reactions.hearts || []).length;
+      const laughsCount = (reactions.laughs || []).length;
+      const dislikesCount = (reactions.dislikes || []).length;
+      const totalReactionsCount = likesCount + heartsCount + laughsCount + dislikesCount;
+    
+    // Check if current user has liked this post
+    let userReaction = null;
+    let isLiked = false;
+    if (req.user && req.user.id) {
+      // Check if user has liked the post
+      isLiked = reactions.likes && reactions.likes.some(r => r.user === req.user.id.toString());
+      
+      // Check for other reactions
+      Object.keys(reactions).forEach(reactionType => {
+        const hasReacted = originalPost.hasUserReacted(req.user.id, reactionType);
+        if (hasReacted) {
+          userReaction = reactionType;
+        }
+      });
+    }
+    
+    // Ensure location fields are explicitly included
+    const enhancedPost = {
+      ...postData,
+      locationStreet: originalPost.locationStreet || postData.locationStreet,
+      locationCity: originalPost.locationCity || postData.locationCity,
+      locationState: originalPost.locationState || postData.locationState,
+      locationCountry: originalPost.locationCountry || postData.locationCountry,
+      // Return likes count only (not total reactions)
+      reactions: likesCount,
+      // Add user like status
+      isLiked,
+      // Add user reaction status for other reactions
+      userReaction,
+      // Ensure comment count is included
+      commentsCount: postData.commentsCount || 0
+    };
+    
+
+
+    
+    return enhancedPost;
+  }));
+
+  const responseData = {
+    items: serializedPosts,
+    total: posts.count,
+    page: parseInt(page),
+    totalPages: Math.ceil(posts.count / limit)
+  };
+
+  // Cache the results
+  if (useCache === 'true') {
+    const cacheKey = `posts_feed_${req.user.id}_${type || 'all'}_${feedType || 'all'}_${page}_${limit}`;
+    await RedisService.cachePostsFeed(cacheKey, responseData);
+  }
+  
+  // Clear old cache entries to ensure fresh data
+  try {
+    const oldCacheKey = `posts_feed_${req.user.id}_${type || 'all'}_${feedType || 'all'}_${page}_${limit}`;
+    await RedisService.clearCache(oldCacheKey);
+  } catch (cacheError) {
+    // Ignore cache clearing errors
+  }
+
   res.json({
     success: true,
-    data: {
-      items: posts.rows,
-      total: posts.count,
-      page: parseInt(page),
-      totalPages: Math.ceil(posts.count / limit)
-    }
+    data: responseData
   });
+  } catch (error) {
+    console.error('🔍 Error in main posts route:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching posts',
+      error: error.message
+    });
+  }
 }));
 
 /**
@@ -252,71 +411,167 @@ router.post('/', authenticate, asyncHandler(async (req, res) => {
     });
   }
 
-  // Prepare post data
-  const postData = {
-    author_id: req.user.id,
-    title: title?.trim() || null,
-    content: content.trim(),
-    type: type || 'general',
-    media: media || [],
-    tags: tags || [],
-    isAnonymous: isAnonymous || false,
-    commentsEnabled: commentsEnabled !== false, // Default to true
-    visibility: visibility || 'public',
-    category: category || 'community',
-    urgencyLevel: urgencyLevel || 'medium'
-  };
+  try {
+    // Prepare post data with correct field mappings
+    const postData = {
+      author_id: req.user.id,
+      title: title?.trim() || null,
+      content: content.trim(),
+      type: type || 'general',
+      media: media || [],
+      tags: tags || [],
+      isAnonymous: isAnonymous || false,
+      commentsEnabled: commentsEnabled !== false,
+      visibility: visibility || 'public',
+      category: category || 'community',
+      urgencyLevel: urgencyLevel || 'medium',
+      // Add default values for required fields
+      status: 'active',
+      views: 0,
+      commentsCount: 0,
+      sharesCount: 0,
+      savesCount: 0,
+      reactions: {
+        likes: [],
+        dislikes: [],
+        hearts: [],
+        laughs: []
+      }
+    };
 
-  // Handle location data
-  if (location) {
-    if (typeof location === 'string') {
-      // Simple string location
-      postData.locationFormattedAddress = location;
-    } else if (typeof location === 'object') {
-      // Structured location object
-      postData.locationCity = location.city;
-      postData.locationState = location.state;
-      postData.locationCountry = location.country;
-      postData.locationFormattedAddress = location.formattedAddress;
-      
-      if (location.coordinates) {
-        postData.latitude = location.coordinates.latitude;
-        postData.longitude = location.coordinates.longitude;
+
+
+    // Handle location data with correct field mappings
+    
+    if (location) {
+      if (typeof location === 'string') {
+        // Simple string location - parse it into components
+        const addressComponents = parseFormattedAddress(location);
+        postData.locationStreet = addressComponents.street;
+        postData.locationCity = addressComponents.city;
+        postData.locationState = addressComponents.state;
+        postData.locationCountry = addressComponents.country;
+        postData.locationPostalCode = addressComponents.postalCode;
+      } else if (typeof location === 'object') {
+        // Structured location object - only store street, city, state, country
+        postData.locationCity = location.city;
+        postData.locationState = location.state;
+        postData.locationCountry = location.country;
+        postData.locationStreet = location.street;
+        postData.locationPostalCode = location.postalCode;
+        
+        if (location.coordinates) {
+          postData.latitude = location.coordinates.latitude;
+          postData.longitude = location.coordinates.longitude;
+        }
+        
+        // If we have formattedAddress but missing individual components, parse it
+        if (location.formattedAddress && (!location.city || !location.state)) {
+          const addressComponents = parseFormattedAddress(location.formattedAddress);
+          postData.locationStreet = location.street || addressComponents.street;
+          postData.locationCity = location.city || addressComponents.city;
+          postData.locationState = location.state || addressComponents.state;
+          postData.locationCountry = location.country || addressComponents.country;
+          postData.locationPostalCode = location.postalCode || addressComponents.postalCode;
+        }
+      }
+    } else {
+      // If no location provided, use user's location data as fallback
+      if (req.user.location_street || req.user.location_city) {
+        postData.locationStreet = req.user.location_street;
+        postData.locationCity = req.user.location_city;
+        postData.locationState = req.user.location_state;
+        postData.locationCountry = req.user.location_country;
+        postData.latitude = req.user.location_latitude;
+        postData.longitude = req.user.location_longitude;
       }
     }
-  }
+    
 
-  // Handle scheduling
-  if (scheduledFor && scheduledFor !== 'now') {
-    const scheduledDate = new Date(scheduledFor);
-    if (scheduledDate > new Date()) {
-      postData.scheduled_for = scheduledDate;
-      postData.is_scheduled = true;
+
+    // Handle scheduling
+    if (scheduledFor && scheduledFor !== 'now') {
+      const scheduledDate = new Date(scheduledFor);
+      if (scheduledDate > new Date()) {
+        postData.scheduled_for = scheduledDate;
+        postData.is_scheduled = true;
+      }
     }
+
+    // Handle urgency expiration
+    if (urgencyLevel === 'high' || urgencyLevel === 'critical') {
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 24); // 24 hours for urgent posts
+      postData.urgencyExpiresAt = expiresAt;
+    }
+
+    const post = await Post.create(postData);
+
+    const populatedPost = await Post.findByPk(post.id, {
+      include: [{
+        model: User,
+        as: 'author',
+        attributes: ['id', 'displayName', 'username', 'avatar_url']
+      }]
+    });
+
+    // Handle mentions in post content and tags
+    const mentionRegex = /@(\w+)/g;
+    const contentMentions = content.match(mentionRegex) || [];
+    const tagMentions = tags ? tags.filter(tag => tag.startsWith('@')) : [];
+    const allMentions = [...contentMentions, ...tagMentions];
+    
+    if (allMentions.length > 0) {
+      try {
+        const mentionedUsernames = [...new Set(allMentions.map(m => m.substring(1)))];
+        const mentionedUsers = await User.findAll({
+          where: { username: { [Op.in]: mentionedUsernames } },
+          attributes: ['id']
+        });
+
+        if (mentionedUsers.length > 0) {
+          const mentionedUserIds = mentionedUsers.map(u => u.id);
+          
+          // Send notifications to mentioned users
+          await NotificationService.notifyPostMention(post.id, req.user.id, mentionedUserIds);
+
+          // Emit socket notifications for mentions
+          const io = getIO();
+          if (io) {
+            mentionedUserIds.forEach(mentionedUserId => {
+              if (mentionedUserId !== req.user.id) {
+                io.to(mentionedUserId).emit('notification', {
+                  type: 'post_mention',
+                  title: 'You were mentioned',
+                  message: `${req.user.displayName || req.user.username} mentioned you in a post`,
+                  customData: {
+                    postId: post.id,
+                    postContent: content.substring(0, 100),
+                    mentionerName: req.user.displayName || req.user.username
+                  }
+                });
+              }
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error sending mention notifications:', error);
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Post created successfully',
+      data: { post: populatedPost }
+    });
+  } catch (error) {
+    console.error('❌ Error creating post:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create post',
+      error: error.message
+    });
   }
-
-  // Handle urgency expiration
-  if (urgencyLevel === 'urgent' || urgencyLevel === 'critical') {
-    const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + 24); // 24 hours for urgent posts
-    postData.urgency_expires_at = expiresAt;
-  }
-
-  const post = await Post.create(postData);
-
-  const populatedPost = await Post.findByPk(post.id, {
-    include: [{
-      model: User,
-      as: 'author',
-      attributes: ['id', 'displayName', 'username', 'avatar_url']
-    }]
-  });
-
-  res.status(201).json({
-    success: true,
-    message: 'Post created successfully',
-    data: { post: populatedPost }
-  });
 }));
 
 /**
@@ -353,15 +608,18 @@ router.post('/:postId/comments', authenticate, validateComment, asyncHandler(asy
   const comment = await Comment.create({
     content,
     postId,
-    author_id: req.user.id,
+    userId: req.user.id,
     parentId: parentId || null
   });
+
+  // Update post's comment count
+  await post.increment('commentsCount');
 
   const populatedComment = await Comment.findByPk(comment.id, {
     include: [{
       model: User,
       as: 'author',
-      attributes: ['id', 'username', 'displayName', 'avatar']
+      attributes: ['id', 'username', 'displayName', 'avatar_url']
     }]
   });
 
@@ -374,54 +632,184 @@ router.post('/:postId/comments', authenticate, validateComment, asyncHandler(asy
       }]
     });
     
-    if (parentComment && parentComment.author.id !== req.user.id) {
-      // Create notification for reply
-      await Notification.createNotification({
-        recipientId: parentComment.author.id,
-        senderId: req.user.id,
-        title: 'New Reply',
-        message: `${req.user.displayName} replied to your comment`,
-        type: 'post_comment',
-        customData: {
-          postId,
-          commentId: comment.id,
-          parentCommentId: parentId
-        },
-        actionUrl: `/posts/${postId}#comment-${comment.id}`,
-        actionText: 'View Reply'
-      });
+    if (parentComment && parentComment.author && parentComment.author.id && parentComment.author.id !== req.user.id) {
+      // Use NotificationService instead of direct notification creation
+      await NotificationService.notifyCommentReply(comment.id, req.user.id, parentId);
     }
   } else {
     // Notify post author of new comment
-    if (post.author_id !== req.user.id) {
-      await Notification.createNotification({
-        recipientId: post.author_id,
-        senderId: req.user.id,
-        title: 'New Comment',
-        message: `${req.user.displayName} commented on your post`,
-        type: 'post_comment',
-        customData: {
-          postId,
-          commentId: comment.id
-        },
-        actionUrl: `/posts/${postId}#comment-${comment.id}`,
-        actionText: 'View Comment'
-      });
+    if (post.author_id && post.author_id !== req.user.id) {
+      // Use NotificationService instead of direct notification creation
+      await NotificationService.notifyPostComment(comment.id, req.user.id, post.id);
     }
   }
 
   res.status(201).json({
     success: true,
     message: 'Comment added successfully',
-    data: { comment: populatedComment }
+    data: { 
+      comment: {
+        id: populatedComment.id,
+        content: populatedComment.content,
+        postId: populatedComment.postId,
+        parentId: populatedComment.parentId,
+        likesCount: populatedComment.likes || 0,
+        createdAt: populatedComment.createdAt,
+        updatedAt: populatedComment.updatedAt,
+        author: {
+          id: populatedComment.author.id,
+          displayName: populatedComment.author.displayName,
+          username: populatedComment.author.username,
+          avatarUrl: populatedComment.author.avatar_url
+        },
+        replies: [],
+        isLiked: false
+      }
+    }
   });
 }));
+
+
+
+
 
 /**
  * @route   GET /api/posts
  * @desc    Get feed posts
  * @access  Private
  */
+/**
+ * @route   GET /api/posts/user/:userId
+ * @desc    Get posts by user ID
+ * @access  Private
+ */
+router.get('/user/:userId', authenticate, asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  const { page = 1, limit = 20 } = req.query;
+  const offset = (page - 1) * limit;
+
+  try {
+    // Optimized query with specific attributes and efficient joins
+    const { count, rows: posts } = await Post.findAndCountAll({
+      where: { 
+        author_id: userId,
+        status: 'active'
+      },
+      attributes: [
+        'id', 'title', 'content', 'type', 'author_id', 'is_anonymous', 'media',
+        'latitude', 'longitude', 'location_street', 'location_city', 'location_state',
+        'location_country', 'location_postal_code', 'location_formatted_address',
+        'micro_community_id', 'city_id', 'location_radius', 'tags', 'category',
+        'reactions', 'comments_count', 'comments_enabled', 'shares_count',
+        'saves_count', 'visibility', 'status', 'event_data', 'sale_data',
+        'urgency_level', 'urgency_expires_at', 'is_reported', 'report_count',
+        'is_reviewed', 'reviewed_by', 'reviewed_at', 'moderation_notes',
+        'auto_moderated', 'moderation_flags', 'views', 'unique_views',
+        'click_through_rate', 'engagement_rate', 'scheduled_for', 'is_scheduled',
+        'edit_history', 'is_edited', 'last_edited_at', 'boosted_data',
+        'created_at', 'updated_at'
+      ],
+      include: [
+        {
+          model: User,
+          as: 'author',
+          attributes: ['id', 'displayName', 'username', 'avatar_url']
+        }
+      ],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+
+    // Get comment counts in a single query to avoid N+1 problem
+    const postIds = posts.map(post => post.id);
+    let commentCounts = {};
+    
+    if (postIds.length > 0) {
+      const commentCountResults = await Comment.findAll({
+        attributes: [
+          'postId',
+          [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+        ],
+        where: {
+          postId: postIds,
+          status: 'active'
+        },
+        group: ['postId'],
+        raw: true
+      });
+      
+      commentCountResults.forEach(result => {
+        commentCounts[result.postId] = parseInt(result.count);
+      });
+    }
+
+    // Process posts with optimized reaction handling
+    const processedPosts = posts.map(post => {
+      const postData = post.toJSON();
+      
+      // Parse reactions if needed
+      let reactions = postData.reactions || {};
+      if (typeof reactions === 'string') {
+        try {
+          reactions = JSON.parse(reactions);
+        } catch (e) {
+          reactions = {};
+        }
+      }
+      
+      // Calculate likes count only (not total reactions)
+      const likesCount = (reactions.likes || []).length;
+      const heartsCount = (reactions.hearts || []).length;
+      const laughsCount = (reactions.laughs || []).length;
+      const dislikesCount = (reactions.dislikes || []).length;
+      const totalReactionsCount = likesCount + heartsCount + laughsCount + dislikesCount;
+      
+      // Check user reaction efficiently
+      let userReaction = null;
+      let isLiked = false;
+      if (req.user && req.user.id) {
+        // Check if user has liked the post
+        isLiked = reactions.likes && reactions.likes.some(r => r.user === req.user.id.toString());
+        
+        // Check for other reactions
+        Object.keys(reactions).forEach(reactionType => {
+          if (reactions[reactionType] && reactions[reactionType].some(r => r.user === req.user.id.toString())) {
+            userReaction = reactionType;
+          }
+        });
+      }
+      
+      return {
+        ...postData,
+        reactions: likesCount,
+        isLiked,
+        userReaction,
+        commentsCount: commentCounts[post.id] || 0
+      };
+    });
+
+
+
+    res.json({
+      success: true,
+      data: {
+        items: processedPosts,
+        total: count,
+        page: parseInt(page),
+        totalPages: Math.ceil(count / limit)
+      }
+    });
+      } catch (error) {
+      console.error('🔍 Error in user posts route:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching user posts',
+        error: error.message
+      });
+    }
+}));
+
 /**
  * @route   GET /api/posts/:postId/comments
  * @desc    Get comments for a post
@@ -443,7 +831,7 @@ router.get('/:postId/comments', authenticate, asyncHandler(async (req, res) => {
       {
         model: User,
         as: 'author',
-        attributes: ['id', 'username', 'displayName', 'avatar']
+        attributes: ['id', 'username', 'displayName', 'avatar_url']
       },
       {
         model: Comment,
@@ -451,7 +839,7 @@ router.get('/:postId/comments', authenticate, asyncHandler(async (req, res) => {
         include: [{
           model: User,
           as: 'author',
-          attributes: ['id', 'username', 'displayName', 'avatar']
+          attributes: ['id', 'username', 'displayName', 'avatar_url']
         }],
         limit: 3 // Only get first 3 replies by default
       }
@@ -461,10 +849,34 @@ router.get('/:postId/comments', authenticate, asyncHandler(async (req, res) => {
     offset: parseInt(offset)
   });
 
+  // Add like status for each comment
+  const commentsWithLikeStatus = comments.rows.map(comment => {
+    const commentData = comment.toJSON();
+    
+    // Handle legacy likes data
+    let isLiked = false;
+    let likesCount = 0;
+    
+    try {
+      isLiked = comment.hasUserLiked(req.user.id);
+      likesCount = comment.getLikesCount();
+    } catch (error) {
+      // Fallback to safe defaults
+      isLiked = false;
+      likesCount = 0;
+    }
+    
+    return {
+      ...commentData,
+      isLiked,
+      likesCount
+    };
+  });
+
   res.json({
     success: true,
     data: {
-      comments: comments.rows,
+      items: commentsWithLikeStatus,
       total: comments.count,
       page: parseInt(page),
       totalPages: Math.ceil(comments.count / limit)
@@ -509,14 +921,32 @@ router.put('/:postId/comments/:commentId', authenticate, validateComment, asyncH
     include: [{
       model: User,
       as: 'author',
-      attributes: ['id', 'username', 'displayName', 'avatar']
+      attributes: ['id', 'username', 'displayName', 'avatar_url']
     }]
   });
 
   res.json({
     success: true,
     message: 'Comment updated successfully',
-    data: { comment: updatedComment }
+    data: { 
+      comment: {
+        id: updatedComment.id,
+        content: updatedComment.content,
+        postId: updatedComment.postId,
+        parentId: updatedComment.parentId,
+        likesCount: updatedComment.likes || 0,
+        createdAt: updatedComment.createdAt,
+        updatedAt: updatedComment.updatedAt,
+        author: {
+          id: updatedComment.author.id,
+          displayName: updatedComment.author.displayName,
+          username: updatedComment.author.username,
+          avatarUrl: updatedComment.author.avatar_url
+        },
+        replies: [],
+        isLiked: false
+      }
+    }
   });
 }));
 
@@ -553,6 +983,9 @@ router.delete('/:postId/comments/:commentId', authenticate, asyncHandler(async (
 
   await comment.softDelete();
 
+  // Decrement post's comment count
+  await post.decrement('commentsCount');
+
   res.json({
     success: true,
     message: 'Comment deleted successfully'
@@ -581,70 +1014,43 @@ router.post('/:postId/comments/:commentId/like', authenticate, asyncHandler(asyn
     });
   }
 
-  await comment.addLike();
+  // Check if user already liked the comment
+  const hasLiked = comment.hasUserLiked(req.user.id);
+  
+  if (hasLiked) {
+    // Unlike the comment
+    await comment.removeLike(req.user.id);
+    
+    res.json({
+      success: true,
+      message: 'Comment unliked successfully',
+      data: { 
+        likes: comment.getLikesCount(),
+        isLiked: false
+      }
+    });
+  } else {
+    // Like the comment
+    await comment.addLike(req.user.id);
 
-  // Notify comment author of like
-  if (comment.author_id !== req.user.id) {
-    await Notification.createNotification({
-      recipientId: comment.author_id,
-      senderId: req.user.id,
-      title: 'Comment Liked',
-      message: `${req.user.displayName} liked your comment`,
-      type: 'post_like',
-      customData: {
-        postId,
-        commentId
-      },
-      actionUrl: `/posts/${postId}#comment-${commentId}`,
-      actionText: 'View Comment'
+    // Notify comment author of like
+    if (comment.userId !== req.user.id) {
+      // Use NotificationService for comment likes
+      await NotificationService.notifyCommentLike(commentId, req.user.id, comment.userId);
+    }
+
+    res.json({
+      success: true,
+      message: 'Comment liked successfully',
+      data: { 
+        likes: comment.getLikesCount(),
+        isLiked: true
+      }
     });
   }
-
-  res.json({
-    success: true,
-    message: 'Comment liked successfully',
-    data: { likes: comment.likes }
-  });
 }));
 
-router.get('/', authenticate, asyncHandler(async (req, res) => {
-  const { type, location, limit = 10, page = 1 } = req.query;
-  const offset = (page - 1) * limit;
 
-  const whereClause = {
-    [Op.or]: [
-      { visibility: 'public' },
-      { author_id: req.user.id }
-    ]
-  };
-
-  if (type) whereClause.type = type;
-  if (location) whereClause.location = location;
-
-  const posts = await Post.findAndCountAll({
-    where: whereClause,
-    include: [
-      {
-        model: User,
-        as: 'author',
-        attributes: ['id', 'displayName', 'username', 'avatar_url']
-      }
-    ],
-    limit: parseInt(limit),
-    offset: parseInt(offset),
-    order: [['createdAt', 'DESC']]
-  });
-
-  res.json({
-    success: true,
-    data: {
-      posts: posts.rows,
-      total: posts.count,
-      page: parseInt(page),
-      totalPages: Math.ceil(posts.count / limit)
-    }
-  });
-}));
 
 router.get('/bookmarks', authenticate, asyncHandler(async (req, res) => {
   const { limit = 10, page = 1 } = req.query;
@@ -674,62 +1080,7 @@ router.get('/bookmarks', authenticate, asyncHandler(async (req, res) => {
   }
 }));
 
-/**
- * @route   GET /api/posts/user/:userId
- * @desc    Get posts by user ID
- * @access  Public
- */
-router.get('/user/:userId', asyncHandler(async (req, res) => {
-  const { userId } = req.params;
-  const { page = 1, limit = 20 } = req.query;
-  const offset = (page - 1) * limit;
 
-  try {
-    const { count, rows: posts } = await Post.findAndCountAll({
-      where: { 
-        author_id: userId,
-        status: 'active' // Only return active posts
-      },
-      include: [
-        {
-          model: User,
-          as: 'author',
-          attributes: ['id', 'displayName', 'username', 'avatar_url']
-        },
-        {
-          model: Comment,
-          as: 'comments',
-          include: [{
-            model: User,
-            as: 'author',
-            attributes: ['id', 'displayName', 'username', 'avatar_url']
-          }],
-          limit: 2,
-          order: [['createdAt', 'DESC']]
-        }
-      ],
-      order: [['createdAt', 'DESC']],
-      limit: parseInt(limit),
-      offset: parseInt(offset)
-    });
-
-    res.json({
-      success: true,
-      data: {
-        items: posts,
-        total: count,
-        page: parseInt(page),
-        totalPages: Math.ceil(count / limit)
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching user posts',
-      error: error.message
-    });
-  }
-}));
 
 /**
  * @route   GET /api/posts/:id
@@ -762,9 +1113,39 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
     });
   }
 
+  // Calculate reactions count for the post
+  const postData = post.toJSON();
+        let reactions = postData.reactions || {};
+      
+      // If reactions is a string, try to parse it as JSON
+      if (typeof reactions === 'string') {
+        try {
+          reactions = JSON.parse(reactions);
+        } catch (e) {
+          reactions = {};
+        }
+      }
+      
+      // Calculate total reactions count (likes + hearts + laughs + dislikes)
+      const likesCount = (reactions.likes || []).length;
+      const heartsCount = (reactions.hearts || []).length;
+      const laughsCount = (reactions.laughs || []).length;
+      const dislikesCount = (reactions.dislikes || []).length;
+      const totalReactionsCount = likesCount + heartsCount + laughsCount + dislikesCount;
+  
+  const postWithReactions = {
+    ...postData,
+    reactions: totalReactionsCount
+  };
+
   res.json({
     success: true,
-    data: { post }
+    data: { 
+      post: {
+        ...post.toJSON(),
+        reactions: ((post.reactions || {}).likes || []).length
+      }
+    }
   });
 }));
 
@@ -839,12 +1220,12 @@ router.delete('/:id', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * @route   POST /api/posts/:id/like
+ * @route   POST /api/posts/:postId/like
  * @desc    Like/Unlike a post
  * @access  Private
  */
-router.post('/:id/like', authenticate, asyncHandler(async (req, res) => {
-  const post = await Post.findByPk(req.params.id);
+router.post('/:postId/like', authenticate, asyncHandler(async (req, res) => {
+  const post = await Post.findByPk(req.params.postId);
 
   if (!post) {
     return res.status(404).json({
@@ -853,15 +1234,28 @@ router.post('/:id/like', authenticate, asyncHandler(async (req, res) => {
     });
   }
 
-  const hasLiked = await post.hasLikedBy(req.user);
+
+
+  const hasLiked = post.hasUserReacted(req.user.id, 'likes');
   if (hasLiked) {
-    await post.removeLikedBy(req.user);
+    await post.removeReaction(req.user.id, 'likes');
+    
+    // Fetch the post again to get the latest data
+    const updatedPost = await Post.findByPk(req.params.postId);
+    
+
     res.json({
       success: true,
       message: 'Post unliked successfully'
     });
   } else {
-    await post.addLikedBy(req.user);
+    await post.addReaction(req.user.id, 'likes');
+    
+      // Fetch the post again to get the latest data
+    const updatedPost = await Post.findByPk(req.params.postId);
+    
+
+    
     res.json({
       success: true,
       message: 'Post liked successfully'
@@ -870,12 +1264,25 @@ router.post('/:id/like', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * @route   POST /api/posts/:id/comments
- * @desc    Add a comment to a post
+ * @route   POST /api/posts/:id/react
+ * @desc    React to a post (like, heart, laugh, dislike)
  * @access  Private
  */
-router.post('/:id/comments', authenticate, asyncHandler(async (req, res) => {
-  const post = await Post.findByPk(req.params.id);
+router.post('/:id/react', authenticate, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { reactionType } = req.body; // 'like', 'heart', 'laugh', 'dislike'
+
+  const validReactions = ['like', 'heart', 'laugh', 'dislike'];
+  if (!validReactions.includes(reactionType)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid reaction type'
+    });
+  }
+
+  const post = await Post.findByPk(id, {
+    include: [{ model: User, as: 'author', attributes: ['id', 'displayName', 'username'] }]
+  });
 
   if (!post) {
     return res.status(404).json({
@@ -884,58 +1291,245 @@ router.post('/:id/comments', authenticate, asyncHandler(async (req, res) => {
     });
   }
 
-  const comment = await Comment.create({
-    postId: post.id,
-    author_id: req.user.id,
-    content: req.body.content
-  });
+  const userId = req.user.id;
+  const reactions = post.reactions || {};
 
-  const populatedComment = await Comment.findByPk(comment.id, {
-    include: [{
-      model: User,
-      as: 'author',
-      attributes: ['id', 'displayName', 'username', 'avatar_url']
-    }]
-  });
+  // Check if user already reacted
+  const hasReacted = reactions[reactionType]?.includes(userId);
+  
+  if (hasReacted) {
+    // Remove reaction
+    reactions[reactionType] = reactions[reactionType].filter(id => id !== userId);
+  } else {
+    // Add reaction
+    if (!reactions[reactionType]) {
+      reactions[reactionType] = [];
+    }
+    reactions[reactionType].push(userId);
+  }
 
-  res.status(201).json({
+  await post.update({ reactions });
+
+  // Send notification for new reactions (only for likes and hearts)
+  if (!hasReacted && (reactionType === 'like' || reactionType === 'heart')) {
+    try {
+      await NotificationService.notifyPostLike(post.id, userId, post.author_id);
+      
+      // Emit socket notification
+      const io = getIO();
+      if (io) {
+        io.to(post.author_id).emit('notification', {
+          type: 'post_like',
+          title: 'New Like',
+          message: `${req.user.displayName || req.user.username} ${reactionType === 'like' ? 'liked' : 'hearted'} your post`,
+          customData: {
+            postId: post.id,
+            postTitle: post.title || 'Post',
+            likerName: req.user.displayName || req.user.username
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error sending post like notification:', error);
+    }
+  }
+
+  res.json({
     success: true,
-    message: 'Comment added successfully',
-    data: { comment: populatedComment }
+    message: hasReacted ? 'Reaction removed' : 'Reaction added',
+    data: { reactions: post.reactions }
   });
 }));
 
 /**
- * @route   GET /api/posts/:id/comments
- * @desc    Get comments of a post
+ * @route   POST /api/posts/:id/comment
+ * @desc    Add a comment to a post
  * @access  Private
  */
-router.get('/:id/comments', authenticate, asyncHandler(async (req, res) => {
-  const { limit = 10, page = 1 } = req.query;
-  const offset = (page - 1) * limit;
+router.post('/:id/comment', authenticate, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { content, parentCommentId } = req.body;
 
-  const comments = await Comment.findAndCountAll({
-    where: { postId: req.params.id },
-    include: [{
-      model: User,
-      as: 'author',
-      attributes: ['id', 'displayName', 'username', 'avatar_url']
-    }],
-    limit: parseInt(limit),
-    offset: parseInt(offset),
-    order: [['createdAt', 'DESC']]
+  if (!content || !content.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Comment content is required'
+    });
+  }
+
+  const post = await Post.findByPk(id);
+  if (!post) {
+    return res.status(404).json({
+      success: false,
+      message: 'Post not found'
+    });
+  }
+
+  if (!post.commentsEnabled) {
+    return res.status(400).json({
+      success: false,
+      message: 'Comments are disabled for this post'
+    });
+  }
+
+  const comment = await Comment.create({
+    content: content.trim(),
+    userId: req.user.id,
+    postId: id,
+    parentId: parentCommentId || null
   });
+
+  const commentWithAuthor = await Comment.findByPk(comment.id, {
+    include: [{ model: User, as: 'author', attributes: ['id', 'displayName', 'username'] }]
+  });
+
+  // Send notification for new comment
+  try {
+    if (parentCommentId) {
+      // This is a reply to a comment
+      await NotificationService.notifyCommentReply(comment.id, req.user.id, parentCommentId);
+    } else {
+      // This is a comment on the post
+      await NotificationService.notifyPostComment(comment.id, req.user.id, post.id);
+    }
+
+    // Emit socket notification
+    const io = getIO();
+    if (io) {
+      const notificationData = {
+        type: 'post_comment',
+        title: 'New Comment',
+        message: `${req.user.displayName || req.user.username} commented on your post`,
+        customData: {
+          postId: post.id,
+          commentId: comment.id,
+          commentContent: content.substring(0, 100),
+          commenterName: req.user.displayName || req.user.username
+        }
+      };
+
+      if (parentCommentId) {
+        // Get parent comment author
+        const parentComment = await Comment.findByPk(parentCommentId, {
+          include: [{ model: User, as: 'author', attributes: ['id'] }]
+        });
+        if (parentComment && parentComment.author.id !== req.user.id) {
+          io.to(parentComment.author.id).emit('notification', {
+            ...notificationData,
+            title: 'New Reply',
+            message: `${req.user.displayName || req.user.username} replied to your comment`
+          });
+        }
+      } else if (post.author_id !== req.user.id) {
+        // Notify post author
+        io.to(post.author_id).emit('notification', notificationData);
+      }
+    }
+  } catch (error) {
+    console.error('Error sending comment notification:', error);
+  }
+
+  // Check for mentions in comment
+  const mentionRegex = /@(\w+)/g;
+  const mentions = content.match(mentionRegex);
+  if (mentions) {
+    try {
+      const mentionedUsernames = mentions.map(m => m.substring(1));
+      const mentionedUsers = await User.findAll({
+        where: { username: { [Op.in]: mentionedUsernames } },
+        attributes: ['id']
+      });
+
+      if (mentionedUsers.length > 0) {
+        const mentionedUserIds = mentionedUsers.map(u => u.id);
+        await NotificationService.notifyPostMention(post.id, req.user.id, mentionedUserIds);
+
+        // Emit socket notifications for mentions
+        const io = getIO();
+        if (io) {
+          mentionedUserIds.forEach(mentionedUserId => {
+            if (mentionedUserId !== req.user.id) {
+              io.to(mentionedUserId).emit('notification', {
+                type: 'post_mention',
+                title: 'You were mentioned',
+                message: `${req.user.displayName || req.user.username} mentioned you in a comment`,
+                customData: {
+                  postId: post.id,
+                  commentId: comment.id,
+                  commentContent: content.substring(0, 100),
+                  mentionerName: req.user.displayName || req.user.username
+                }
+              });
+            }
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error sending mention notifications:', error);
+    }
+  }
+
+  res.status(201).json({
+    success: true,
+    message: 'Comment added successfully',
+    data: { comment: commentWithAuthor }
+  });
+}));
+
+/**
+ * @route   POST /api/posts/:id/share
+ * @desc    Share a post
+ * @access  Private
+ */
+router.post('/:id/share', authenticate, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const post = await Post.findByPk(id, {
+    include: [{ model: User, as: 'author', attributes: ['id', 'displayName', 'username'] }]
+  });
+
+  if (!post) {
+    return res.status(404).json({
+      success: false,
+      message: 'Post not found'
+    });
+  }
+
+  // Increment share count
+  await post.update({
+    sharesCount: (post.sharesCount || 0) + 1
+  });
+
+  // Send notification for post share
+  try {
+    await NotificationService.notifyPostShare(post.id, req.user.id, post.author_id);
+
+    // Emit socket notification
+    const io = getIO();
+    if (io && post.author_id !== req.user.id) {
+      io.to(post.author_id).emit('notification', {
+        type: 'post_share',
+        title: 'Post Shared',
+        message: `${req.user.displayName || req.user.username} shared your post`,
+        customData: {
+          postId: post.id,
+          postTitle: post.title || 'Post',
+          sharerName: req.user.displayName || req.user.username
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error sending post share notification:', error);
+  }
 
   res.json({
     success: true,
-    data: {
-      comments: comments.rows,
-      total: comments.count,
-      page: parseInt(page),
-      totalPages: Math.ceil(comments.count / limit)
-    }
+    message: 'Post shared successfully',
+    data: { sharesCount: post.sharesCount }
   });
 }));
+
+
 
 /**
  * @route   GET /api/posts/bookmarks
@@ -1005,62 +1599,7 @@ router.get('/bookmarks', authenticate, asyncHandler(async (req, res) => {
   }
 }));
 
-/**
- * @route   GET /api/posts/user/:userId
- * @desc    Get posts by user ID
- * @access  Public
- */
-router.get('/user/:userId', asyncHandler(async (req, res) => {
-  const { userId } = req.params;
-  const { page = 1, limit = 20 } = req.query;
-  const offset = (page - 1) * limit;
 
-  try {
-    const { count, rows: posts } = await Post.findAndCountAll({
-      where: { 
-        author_id: userId,
-        status: 'active'
-      },
-      include: [
-        {
-          model: User,
-          as: 'author',
-          attributes: ['id', 'displayName', 'username', 'avatar_url']
-        },
-        {
-          model: Comment,
-          as: 'comments',
-          include: [{
-            model: User,
-            as: 'author',
-            attributes: ['id', 'displayName', 'username', 'avatar_url']
-          }],
-          limit: 2,
-          order: [['createdAt', 'DESC']]
-        }
-      ],
-      order: [['createdAt', 'DESC']],
-      limit: parseInt(limit),
-      offset: parseInt(offset)
-    });
-
-    res.json({
-      success: true,
-      data: {
-        items: posts,
-        total: count,
-        page: parseInt(page),
-        totalPages: Math.ceil(count / limit)
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching user posts',
-      error: error.message
-    });
-  }
-}));
 
 /**
  * @route   GET /api/posts/scheduled
@@ -1257,6 +1796,83 @@ router.put('/scheduled/notifications/preferences', authenticate, asyncHandler(as
       error: error.message
     });
   }
+}));
+
+/**
+ * @route   GET /api/posts/:postId/likes
+ * @desc    Get users who liked a specific post
+ * @access  Private
+ */
+router.get('/:postId/likes', authenticate, asyncHandler(async (req, res) => {
+  const { postId } = req.params;
+  const { page = 1, limit = 20 } = req.query;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  // Find the post
+  const post = await Post.findByPk(postId);
+  if (!post) {
+    return res.status(404).json({
+      success: false,
+      message: 'Post not found'
+    });
+  }
+
+  // Get reactions from the post
+  let reactions = post.reactions || {};
+  
+  // If reactions is a string, try to parse it as JSON
+  if (typeof reactions === 'string') {
+    try {
+      reactions = JSON.parse(reactions);
+    } catch (error) {
+      reactions = {};
+    }
+  }
+
+  // Get user IDs who liked the post
+  const likedUserIds = reactions.likes || [];
+  
+  if (likedUserIds.length === 0) {
+    return res.json({
+      success: true,
+      data: {
+        users: [],
+        total: 0,
+        page: parseInt(page),
+        totalPages: 0
+      }
+    });
+  }
+
+  // Get user details for the liked users with pagination
+  const users = await User.findAndCountAll({
+    where: {
+      id: { [Op.in]: likedUserIds }
+    },
+    attributes: ['id', 'displayName', 'username', 'avatar_url', 'location_city', 'location_state'],
+    limit: parseInt(limit),
+    offset: offset,
+    order: [['displayName', 'ASC']]
+  });
+
+  const transformedUsers = users.rows.map(user => ({
+    id: user.id,
+    displayName: user.displayName,
+    username: user.username,
+    avatarUrl: user.avatar_url,
+    locationCity: user.location_city,
+    locationState: user.location_state
+  }));
+
+  res.json({
+    success: true,
+    data: {
+      users: transformedUsers,
+      total: users.count,
+      page: parseInt(page),
+      totalPages: Math.ceil(users.count / parseInt(limit))
+    }
+  });
 }));
 
 export default router;

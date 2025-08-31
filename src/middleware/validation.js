@@ -272,14 +272,31 @@ export const validateSendMessage = [
   param('chatId')
     .isMongoId()
     .withMessage('Invalid chat ID'),
-  body('content.text')
+  body('content')
     .optional()
-    .trim()
-    .isLength({ min: 1, max: 2000 })
-    .withMessage('Message text must be between 1 and 2000 characters'),
+    .custom((value) => {
+      if (typeof value === 'string') {
+        if (value.length < 1 || value.length > 2000) {
+          throw new Error('Message text must be between 1 and 2000 characters');
+        }
+      } else if (value && typeof value === 'object' && value.text) {
+        if (value.text.length < 1 || value.text.length > 2000) {
+          throw new Error('Message text must be between 1 and 2000 characters');
+        }
+      }
+      return true;
+    }),
   body('type')
     .isIn(['text', 'image', 'video', 'audio', 'file', 'location', 'contact'])
     .withMessage('Invalid message type'),
+  body('media')
+    .optional()
+    .isObject()
+    .withMessage('Media must be an object'),
+  body('location')
+    .optional()
+    .isObject()
+    .withMessage('Location must be an object'),
   handleValidationErrors
 ];
 

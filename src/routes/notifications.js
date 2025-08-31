@@ -3,6 +3,7 @@ import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { Notification, User } from '../models/index.js';
 import { Op } from 'sequelize';
+import NotificationService from '../services/notificationService.js';
 
 const router = express.Router();
 
@@ -12,37 +13,32 @@ const router = express.Router();
  * @access  Private
  */
 router.get('/', authenticate, asyncHandler(async (req, res) => {
-  const { limit = 20, page = 1, status } = req.query;
-  const offset = (page - 1) * limit;
+  const { limit = 20, page = 1, status, useCache = 'true' } = req.query;
 
-  const whereClause = { recipientId: req.user.id };
-  if (status) {
-    whereClause.status = status;
-  }
+  try {
+    const notifications = await Notification.getUserNotifications(req.user.id, {
+      limit: parseInt(limit),
+      skip: (page - 1) * parseInt(limit),
+      status,
+      useCache: useCache === 'true'
+    });
 
-  const notifications = await Notification.findAndCountAll({
-    where: whereClause,
-    include: [
-      {
-        model: User,
-        as: 'sender',
-        attributes: ['id', 'displayName', 'username', 'avatar_url']
+    res.json({
+      success: true,
+      data: {
+        items: notifications,
+        total: notifications.length,
+        page: parseInt(page),
+        totalPages: Math.ceil(notifications.length / limit)
       }
-    ],
-    limit: parseInt(limit),
-    offset: parseInt(offset),
-    order: [['createdAt', 'DESC']]
-  });
-
-  res.json({
-    success: true,
-    data: {
-      items: notifications.rows,
-      total: notifications.count,
-      page: parseInt(page),
-      totalPages: Math.ceil(notifications.count / limit)
-    }
-  });
+    });
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching notifications'
+    });
+  }
 }));
 
 /**
@@ -51,17 +47,22 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
  * @access  Private
  */
 router.get('/unread', authenticate, asyncHandler(async (req, res) => {
-  const count = await Notification.count({
-    where: {
-      recipientId: req.user.id,
-      status: 'unread'
-    }
-  });   
-
-  res.json({
-    success: true,
-    data: { count }
-  });
+  const { useCache = 'true' } = req.query;
+  
+  try {
+    const count = await Notification.getUnreadCount(req.user.id, useCache === 'true');
+    
+    res.json({
+      success: true,
+      data: { count }
+    });
+  } catch (error) {
+    console.error('Error getting unread count:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error getting unread count'
+    });
+  }
 }));
 
 /**
@@ -72,24 +73,28 @@ router.get('/unread', authenticate, asyncHandler(async (req, res) => {
 router.put('/mark-read', authenticate, asyncHandler(async (req, res) => {
   const { notificationIds } = req.body;
 
-  const whereClause = {
-    recipientId: req.user.id,
-    status: 'unread'
-  };
+  try {
+    if (notificationIds && notificationIds.length > 0) {
+      // Mark specific notifications as read
+      await Notification.update(
+        { status: 'read' },
+        { where: { id: { [Op.in]: notificationIds }, recipientId: req.user.id } }
+      );
+    } else {
+      // Mark all notifications as read
+      await Notification.markAllAsRead(req.user.id);
+    }
 
-  if (notificationIds) {
-    whereClause.id = { [Op.in]: notificationIds };
+    res.json({
+      success: true,
+      message: 'Notifications marked as read successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error marking notifications as read'
+    });
   }
-
-  await Notification.update(
-    { status: 'read' },
-    { where: whereClause }
-  );
-
-  res.json({
-    success: true,
-    message: 'Notifications marked as read successfully'
-  });
 }));
 
 /**
@@ -331,6 +336,62 @@ router.post('/bulk', authenticate, asyncHandler(async (req, res) => {
     success: true,
     message: `${notifications.length} notifications created successfully`,
     data: { count: notifications.length }
+  });
+}));
+
+/**
+ * @route   POST /api/notifications/cleanup-duplicates
+ * @desc    Remove duplicate notifications for the current user
+ * @access  Private
+ */
+router.post('/cleanup-duplicates', authenticate, asyncHandler(async (req, res) => {
+  const { hours = 24 } = req.body;
+  
+  const removedCount = await NotificationService.removeDuplicateNotifications(req.user.id, hours);
+  
+  res.json({
+    success: true,
+    message: `Removed ${removedCount} duplicate notifications`,
+    data: { removedCount }
+  });
+}));
+
+/**
+ * @route   GET /api/notifications/stats
+ * @desc    Get notification statistics for the current user
+ * @access  Private
+ */
+router.get('/stats', authenticate, asyncHandler(async (req, res) => {
+  const stats = await NotificationService.getNotificationStats(req.user.id);
+  
+  res.json({
+    success: true,
+    data: { stats }
+  });
+}));
+
+/**
+ * @route   POST /api/notifications/cleanup-old
+ * @desc    Clean up old notifications (admin only)
+ * @access  Private
+ */
+router.post('/cleanup-old', authenticate, asyncHandler(async (req, res) => {
+  // Check if user is admin
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Access denied. Admin privileges required.'
+    });
+  }
+
+  const { daysToKeep = 30 } = req.body;
+  
+  const removedCount = await NotificationService.cleanupOldNotifications(daysToKeep);
+  
+  res.json({
+    success: true,
+    message: `Cleaned up ${removedCount} old notifications`,
+    data: { removedCount }
   });
 }));
 

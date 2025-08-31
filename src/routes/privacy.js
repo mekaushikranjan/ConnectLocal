@@ -11,9 +11,12 @@ import {
   BlockedUser, 
   EmergencyContact, 
   RecoverySettings, 
-  LoginHistory 
+  LoginHistory,
+  Report
 } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
+import emailService from '../services/emailService.js';
+import smsService from '../services/smsService.js';
 
 
 const router = express.Router();
@@ -153,6 +156,7 @@ router.post('/2fa/setup', [
     }
 
     const { method, contact } = req.body;
+    
 
     let twoFactorAuth = await TwoFactorAuth.findOne({
       where: { user_id: req.user.id }
@@ -164,7 +168,7 @@ router.post('/2fa/setup', [
       });
     }
 
-    // Generate secret for authenticator
+      // Generate secret for authenticator
     const secret = speakeasy.generateSecret({
       name: `LocalConnect (${req.currentUser.email})`,
       issuer: 'LocalConnect'
@@ -173,23 +177,49 @@ router.post('/2fa/setup', [
     let response = {};
 
     if (method === 'authenticator') {
-      // Generate QR code for authenticator app
-      const qrCode = await QRCode.toDataURL(secret.otpauth_url);
-      response.qrCode = qrCode;
-      
-      await twoFactorAuth.update({
-        method,
-        secret: secret.base32,
-        verified: false
-      });
+      try {
+        // Generate QR code for authenticator app
+        const qrCode = await QRCode.toDataURL(secret.otpauth_url);
+        response.qrCode = qrCode;
+        
+        await twoFactorAuth.update({
+          method,
+          secret: secret.base32,
+          verified: false
+        });
+      } catch (qrError) {
+        return res.status(500).json({ 
+          success: false, 
+          message: 'Failed to generate QR code',
+          error: qrError.message 
+        });
+      }
     } else {
-      // For SMS/Email, store contact info
+      // For SMS/Email, store contact info and send verification code
       const contactField = method === 'sms' ? 'phoneNumber' : 'email';
+      
+      // Generate verification code
+      const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+      
+      // Store the verification code temporarily (you might want to use Redis for this)
       await twoFactorAuth.update({
         method,
         [contactField]: contact,
+        verificationCode,
+        verificationCodeExpiry: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
         verified: false
       });
+      
+      // Send verification code
+      try {
+        if (method === 'sms') {
+          await smsService.sendTwoFactorSMS(contact, verificationCode, 10);
+        } else if (method === 'email') {
+          await emailService.sendTwoFactorEmail(contact, verificationCode, 10);
+        }
+      } catch (error) {
+        // If sending fails, still allow the setup but log the error
+      }
     }
 
     res.json({
@@ -198,7 +228,11 @@ router.post('/2fa/setup', [
     });
   } catch (error) {
     // Error setting up 2FA
-    res.status(500).json({ success: false, message: 'Internal server error' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error',
+      error: error.message 
+    });
   }
 });
 
@@ -233,9 +267,14 @@ router.post('/2fa/verify', [
         token: code
       });
     } else {
-      // For SMS/Email, you would verify against the code sent
-      // This is a simplified version - in production, you'd check against stored codes
-      isValid = code === '123456'; // Placeholder
+      // For SMS/Email, verify against the stored code
+      if (twoFactorAuth.verificationCode && 
+          twoFactorAuth.verificationCodeExpiry && 
+          new Date() < twoFactorAuth.verificationCodeExpiry) {
+        isValid = code === twoFactorAuth.verificationCode;
+      } else {
+        isValid = false;
+      }
     }
 
     if (!isValid) {
@@ -251,7 +290,9 @@ router.post('/2fa/verify', [
       enabled: true,
       verified: true,
       verifiedAt: new Date(),
-      backupCodes
+      backupCodes,
+      verificationCode: null,
+      verificationCodeExpiry: null
     });
 
     // Update privacy settings

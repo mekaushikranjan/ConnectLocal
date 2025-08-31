@@ -152,7 +152,7 @@ router.get('/requests', authenticate, asyncHandler(async (req, res) => {
       {
         model: User,
         as: 'user1',
-        attributes: ['id', 'displayName', 'username', 'avatar_url']
+        attributes: ['id', 'displayName', 'username', 'avatar_url', 'location_city', 'location_state', 'location_street', 'bio_text']
       }
     ],
     order: [['createdAt', 'DESC']]
@@ -166,7 +166,11 @@ router.get('/requests', authenticate, asyncHandler(async (req, res) => {
       id: request.user1.id,
       displayName: request.user1.displayName,
       username: request.user1.username,
-      avatarUrl: request.user1.avatar_url
+      avatarUrl: request.user1.avatar_url,
+      locationCity: request.user1.location_city,
+      locationState: request.user1.location_state,
+      locationStreet: request.user1.location_street,
+      bio: request.user1.bio_text
     }
   }));
 
@@ -195,7 +199,7 @@ router.get('/requests/incoming', authenticate, asyncHandler(async (req, res) => 
       {
         model: User,
         as: 'user1',
-        attributes: ['id', 'displayName', 'username', 'avatar_url']
+        attributes: ['id', 'displayName', 'username', 'avatar_url', 'location_city', 'location_state', 'location_street', 'bio_text']
       }
     ],
     order: [['createdAt', 'DESC']]
@@ -209,7 +213,11 @@ router.get('/requests/incoming', authenticate, asyncHandler(async (req, res) => 
       id: request.user1.id,
       displayName: request.user1.displayName,
       username: request.user1.username,
-      avatarUrl: request.user1.avatar_url
+      avatarUrl: request.user1.avatar_url,
+      locationCity: request.user1.location_city,
+      locationState: request.user1.location_state,
+      locationStreet: request.user1.location_street,
+      bio: request.user1.bio_text
     }
   }));
 
@@ -238,7 +246,7 @@ router.get('/requests/outgoing', authenticate, asyncHandler(async (req, res) => 
       {
         model: User,
         as: 'user2',
-        attributes: ['id', 'displayName', 'username', 'avatar_url']
+        attributes: ['id', 'displayName', 'username', 'avatar_url', 'location_city', 'location_state', 'location_street', 'bio_text']
       }
     ],
     order: [['createdAt', 'DESC']]
@@ -252,7 +260,11 @@ router.get('/requests/outgoing', authenticate, asyncHandler(async (req, res) => 
       id: request.user2.id,
       displayName: request.user2.displayName,
       username: request.user2.username,
-      avatarUrl: request.user2.avatar_url
+      avatarUrl: request.user2.avatar_url,
+      locationCity: request.user2.location_city,
+      locationState: request.user2.location_state,
+      locationStreet: request.user2.location_street,
+      bio: request.user2.bio_text
     }
   }));
 

@@ -3,6 +3,8 @@ import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { Job, JobApplication, User } from '../models/index.js';
 import { Op } from 'sequelize';
+import NotificationService from '../services/notificationService.js';
+import { getIO } from '../socket/socketHandler.js';
 
 const router = express.Router();
 
@@ -144,6 +146,8 @@ const transformJobForFrontend = (job) => {
  *         $ref: '#/components/responses/ServerError'
  */
 router.post('/', authenticate, asyncHandler(async (req, res) => {
+
+
   const {
     title,
     description,
@@ -193,26 +197,34 @@ router.post('/', authenticate, asyncHandler(async (req, res) => {
     other: Array.isArray(requirements) ? requirements : []
   };
 
-  const job = await Job.create({
-    postedById: req.user.id,
-    title,
-    description,
-    companyData,
-    type,
-    category: 'other', // Default category, could be enhanced
-    locationType: locationType || 'on-site',
-    salaryMin,
-    salaryMax,
-    salaryCurrency: 'INR',
-    salaryPeriod: 'monthly',
-    requirements: requirementsData,
-    applicationEmail: contactEmail,
-    applicationDeadline,
-    address: {
-      city: location,
-      fullAddress: location
-    }
-  });
+
+
+  let job;
+  try {
+    job = await Job.create({
+      postedById: req.user.id,
+      title,
+      description,
+      companyData,
+      type,
+      category: 'other', // Default category, could be enhanced
+      locationType: locationType || 'on-site',
+      salaryMin,
+      salaryMax,
+      salaryCurrency: 'INR',
+      salaryPeriod: 'monthly',
+      requirements: requirementsData,
+      applicationEmail: contactEmail,
+      applicationDeadline,
+      address: {
+        city: location,
+        fullAddress: location
+      }
+    });
+  } catch (error) {
+    console.error('Job creation error:', error);
+    throw error;
+  }
 
   const populatedJob = await Job.findByPk(job.id, {
     include: [{
@@ -289,7 +301,7 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
-      jobs: transformedJobs,
+      items: transformedJobs,
       total: jobs.count,
       page: parseInt(page),
       totalPages: Math.ceil(jobs.count / limit)
@@ -459,6 +471,29 @@ router.post('/:id/apply', authenticate, asyncHandler(async (req, res) => {
     }]
   });
 
+  // Send notification to job poster
+  try {
+    await NotificationService.notifyJobApplication(application.id, req.user.id, job.id);
+
+    // Emit socket notification
+    const io = getIO();
+    if (io && job.postedById !== req.user.id) {
+      io.to(job.postedById).emit('notification', {
+        type: 'job_application',
+        title: 'New Job Application',
+        message: `${req.user.displayName || req.user.username} applied for ${job.title}`,
+        customData: {
+          jobId: job.id,
+          applicationId: application.id,
+          jobTitle: job.title,
+          applicantName: req.user.displayName || req.user.username
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error sending job application notification:', error);
+  }
+
   res.status(201).json({
     success: true,
     message: 'Application submitted successfully',
@@ -555,6 +590,38 @@ router.put('/:jobId/applications/:applicationId', authenticate, asyncHandler(asy
 
   application.status = status;
   await application.save();
+
+  // Send notification to applicant about status update
+  try {
+    await NotificationService.notifyJobApplicationStatus(application.id, status, req.user.id, application.userId);
+
+    // Emit socket notification
+    const io = getIO();
+    if (io && application.userId !== req.user.id) {
+      const statusMessages = {
+        'reviewed': 'Your application is being reviewed',
+        'shortlisted': 'You have been shortlisted for this position',
+        'accepted': 'Congratulations! Your application has been accepted',
+        'rejected': 'Your application was not selected for this position'
+      };
+
+      const message = statusMessages[status] || `Your application status has been updated to ${status}`;
+
+      io.to(application.userId).emit('notification', {
+        type: 'job_application_status',
+        title: 'Application Update',
+        message: `${message} for ${job.title}`,
+        customData: {
+          jobId: job.id,
+          applicationId: application.id,
+          jobTitle: job.title,
+          status
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error sending job application status notification:', error);
+  }
 
   res.json({
     success: true,

@@ -53,6 +53,16 @@ export default (sequelize, DataTypes) => {
     verified_at: {
       type: DataTypes.DATE,
       allowNull: true
+    },
+    
+    // Verification Code for SMS/Email
+    verificationCode: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    verificationCodeExpiry: {
+      type: DataTypes.DATE,
+      allowNull: true
     }
   }, {
       tableName: 'two_factor_auth',

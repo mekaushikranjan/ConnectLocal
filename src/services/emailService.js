@@ -224,6 +224,11 @@ class EmailService {
     `;
     return this.sendEmail(email, subject, html);
   }
+
+  async sendTwoFactorEmail(email, verificationCode, expiryMinutes = 10) {
+    const html = otpTemplate('User', verificationCode, expiryMinutes);
+    return this.sendEmail(email, 'Your LocalConnect Two-Factor Authentication Code', html);
+  }
 }
 
 export default new EmailService();

@@ -238,12 +238,7 @@ export default (sequelize, DataTypes) => {
             { user: user2Id.toString(), is_active: true }
           ]
         }
-      },
-      include: [{
-        model: sequelize.models.User,
-        as: 'participantUsers',
-        attributes: ['id', 'displayName', 'username', 'avatarUrl']
-      }]
+      }
     });
   };
 
@@ -260,11 +255,6 @@ export default (sequelize, DataTypes) => {
     
     return this.findAll({
       where,
-      include: [{
-        model: sequelize.models.User,
-        as: 'participantUsers',
-        attributes: ['id', 'displayName', 'username', 'avatarUrl', 'lastActive']
-      }],
       order: [
         [sequelize.literal("lastMessage->>'timestamp'"), 'DESC'],
         ['updatedAt', 'DESC']

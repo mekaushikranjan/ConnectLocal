@@ -29,7 +29,7 @@ const GroupMember = sequelize.define('GroupMember', {
     defaultValue: 'member'
   },
   status: {
-    type: DataTypes.ENUM('active', 'pending', 'banned'),
+    type: DataTypes.ENUM('active', 'pending', 'banned', 'inactive'),
     allowNull: false,
     defaultValue: 'active'
   },

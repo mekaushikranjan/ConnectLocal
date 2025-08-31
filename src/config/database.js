@@ -20,6 +20,7 @@ const config = {
       freezeTableName: false
     },
     dialectOptions: {
+      // SSL configuration for Supabase
       ssl: {
         require: true,
         rejectUnauthorized: false
@@ -27,14 +28,17 @@ const config = {
       // PgBouncer configuration
       application_name: 'localconnect-backend',
       // Handle PgBouncer transaction mode
-      statement_timeout: 30000,
-      query_timeout: 30000
+      statement_timeout: 60000,
+      query_timeout: 60000,
+      // Additional connection options for Supabase
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000
     }
   },
   test: {
     username: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'password',
-    database: process.env.DB_NAME + '_test' || 'localconnect_test',
+    database: (process.env.DB_NAME || 'localconnect') + '_test',
     host: process.env.DB_HOST || 'localhost',
     port: process.env.DB_PORT || 5432,
     dialect: 'postgres',
@@ -49,6 +53,9 @@ const config = {
       timestamps: true,
       underscored: true,
       freezeTableName: true
+    },
+    dialectOptions: {
+      ssl: false
     }
   },
   production: {
@@ -74,8 +81,11 @@ const config = {
       // PgBouncer configuration
       application_name: 'localconnect-backend',
       // Handle PgBouncer transaction mode
-      statement_timeout: 30000,
-      query_timeout: 30000
+      statement_timeout: 60000,
+      query_timeout: 60000,
+      // Additional connection options for Supabase
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000
     }
   }
 };

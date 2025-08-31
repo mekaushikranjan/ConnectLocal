@@ -34,8 +34,30 @@ export default (sequelize) => {
     references: { model: 'comments', key: 'id' }
   },
   likes: {
-    type: DataTypes.INTEGER,
-    defaultValue: 0
+    type: DataTypes.TEXT,
+    defaultValue: JSON.stringify([]),
+    get() {
+      const value = this.getDataValue('likes');
+      if (typeof value === 'string') {
+        try {
+          return JSON.parse(value);
+        } catch (e) {
+          return [];
+        }
+      }
+      // Handle legacy integer values
+      if (typeof value === 'number') {
+        return [];
+      }
+      return value || [];
+    },
+    set(value) {
+      if (Array.isArray(value)) {
+        this.setDataValue('likes', JSON.stringify(value));
+      } else {
+        this.setDataValue('likes', JSON.stringify([]));
+      }
+    }
   },
   status: {
     type: DataTypes.ENUM('active', 'hidden', 'deleted'),
@@ -64,15 +86,61 @@ export default (sequelize) => {
 });
 
   // Instance methods
-Comment.prototype.addLike = async function() {
-  this.likes += 1;
-  await this.save();
+Comment.prototype.hasUserLiked = function(userId) {
+  try {
+    const likes = this.likes || [];
+    if (!Array.isArray(likes)) {
+      return false;
+    }
+    return likes.includes(userId.toString());
+  } catch (error) {
+    return false;
+  }
 };
 
-Comment.prototype.removeLike = async function() {
-  if (this.likes > 0) {
-    this.likes -= 1;
-    await this.save();
+Comment.prototype.addLike = async function(userId) {
+  try {
+    let likes = this.likes || [];
+    if (!Array.isArray(likes)) {
+      likes = [];
+    }
+    if (!likes.includes(userId.toString())) {
+      likes.push(userId.toString());
+      this.likes = likes;
+      await this.save();
+    }
+  } catch (error) {
+    throw error;
+  }
+};
+
+Comment.prototype.removeLike = async function(userId) {
+  try {
+    let likes = this.likes || [];
+    if (!Array.isArray(likes)) {
+      likes = [];
+    }
+    const userIdStr = userId.toString();
+    const index = likes.indexOf(userIdStr);
+    if (index > -1) {
+      likes.splice(index, 1);
+      this.likes = likes;
+      await this.save();
+    }
+  } catch (error) {
+    throw error;
+  }
+};
+
+Comment.prototype.getLikesCount = function() {
+  try {
+    const likes = this.likes || [];
+    if (!Array.isArray(likes)) {
+      return 0;
+    }
+    return likes.length;
+  } catch (error) {
+    return 0;
   }
 };
 
@@ -110,14 +178,14 @@ Comment.findWithDetails = async function(options = {}) {
     include: [
       {
         association: 'author',
-        attributes: ['id', 'username', 'displayName', 'avatar']
+        attributes: ['id', 'username', 'displayName', 'avatar_url']
       },
       {
         association: 'replies',
         include: [
           {
             association: 'author',
-            attributes: ['id', 'username', 'displayName', 'avatar']
+            attributes: ['id', 'username', 'displayName', 'avatar_url']
           }
         ]
       }

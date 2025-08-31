@@ -3,6 +3,7 @@ import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { Group, GroupMember, User } from '../models/index.js';
 import { Op } from 'sequelize';
+import cityGroupService from '../services/cityGroupService.js';
 
 const router = express.Router();
 
@@ -14,8 +15,13 @@ const transformGroupData = (groupData, membership) => {
     coverImageUrl: groupData.cover_image_url,
     memberCount: groupData.member_count,
     postCount: groupData.post_count,
-    location: groupData.location_json,
-    settings: groupData.settings_json,
+    location: groupData.location_json || {},
+    settings: groupData.settings_json || {
+      allowInvites: true,
+      requireApproval: false,
+      allowPosts: true,
+      allowComments: true
+    },
     createdBy: groupData.creator,
     isJoined: !!membership,
     userRole: membership?.role || null
@@ -28,16 +34,46 @@ const transformGroupData = (groupData, membership) => {
  * @access  Private
  */
 router.get('/', authenticate, asyncHandler(async (req, res) => {
-  const { page = 1, limit = 20, category, privacy } = req.query;
+  const { page = 1, limit = 20, category, privacy, userGroups } = req.query;
   const offset = (page - 1) * limit;
 
-  const whereClause = {
-    status: 'active',
-    [Op.or]: [
+  let whereClause = {
+    status: 'active'
+  };
+
+  // If userGroups is true, get groups where user is a member
+  if (userGroups === 'true') {
+    // Get groups where user is a member
+    const userMemberships = await GroupMember.findAll({
+      where: {
+        user_id: req.user.id,
+        status: 'active'
+      },
+      attributes: ['group_id']
+    });
+
+    const groupIds = userMemberships.map(membership => membership.group_id);
+    
+    if (groupIds.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          items: [],
+          total: 0,
+          page: parseInt(page),
+          totalPages: 0
+        }
+      });
+    }
+
+    whereClause.id = { [Op.in]: groupIds };
+  } else {
+    // Default behavior: public groups or groups created by user
+    whereClause[Op.or] = [
       { privacy: 'public' },
       { created_by: req.user.id }
-    ]
-  };
+    ];
+  }
 
   if (category) whereClause.category = category;
   if (privacy) whereClause.privacy = privacy;
@@ -481,7 +517,7 @@ router.get('/:id/members', authenticate, asyncHandler(async (req, res) => {
       {
         model: User,
         as: 'user',
-        attributes: ['id', 'displayName', 'username', 'avatar_url', 'bio']
+        attributes: ['id', 'displayName', 'username', 'avatar_url', 'bio_text']
       }
     ],
     limit: parseInt(limit),
@@ -489,15 +525,516 @@ router.get('/:id/members', authenticate, asyncHandler(async (req, res) => {
     order: [['role', 'ASC'], ['joinedAt', 'ASC']]
   });
 
+  // Transform member data to match frontend expectations
+  const transformedMembers = members.rows.map(member => ({
+    ...member.toJSON(),
+    user: {
+      ...member.user.toJSON(),
+      bio: member.user.bio_text, // Map bio_text to bio for frontend
+      avatarUrl: member.user.avatar_url // Map avatar_url to avatarUrl
+    }
+  }));
+
   res.json({
     success: true,
     data: {
-      items: members.rows,
+      items: transformedMembers,
       total: members.count,
       page: parseInt(page),
       totalPages: Math.ceil(members.count / limit)
     }
   });
+}));
+
+/**
+ * @route   GET /api/groups/city
+ * @desc    Get all city groups
+ * @access  Private
+ */
+router.get('/city', authenticate, asyncHandler(async (req, res) => {
+  const { page = 1, limit = 20, country, state } = req.query;
+  
+  const result = await cityGroupService.getCityGroups({
+    page: parseInt(page),
+    limit: parseInt(limit),
+    country,
+    state
+  });
+
+  res.json({
+    success: true,
+    data: result
+  });
+}));
+
+/**
+ * @route   GET /api/groups/city/nearby
+ * @desc    Get nearby city groups
+ * @access  Private
+ */
+router.get('/city/nearby', authenticate, asyncHandler(async (req, res) => {
+  const { latitude, longitude, radius = 50 } = req.query;
+  
+  if (!latitude || !longitude) {
+    return res.status(400).json({
+      success: false,
+      message: 'Latitude and longitude are required'
+    });
+  }
+
+  const cityGroups = await cityGroupService.getNearbyCityGroups(
+    parseFloat(latitude),
+    parseFloat(longitude),
+    parseFloat(radius)
+  );
+
+  res.json({
+    success: true,
+    data: {
+      items: cityGroups,
+      total: cityGroups.length
+    }
+  });
+}));
+
+/**
+ * @route   POST /api/groups/city/auto-join
+ * @desc    Manually trigger auto-join to city group
+ * @access  Private
+ */
+router.post('/city/auto-join', authenticate, asyncHandler(async (req, res) => {
+  const { city, state, country } = req.body;
+  
+  if (!city) {
+    return res.status(400).json({
+      success: false,
+      message: 'City name is required'
+    });
+  }
+
+  const result = await cityGroupService.autoJoinCityGroup(
+    req.user.id,
+    city,
+    state,
+    country
+  );
+
+  res.json({
+    success: result.success,
+    message: result.message,
+    data: result
+  });
+}));
+
+/**
+ * @route   POST /api/groups/city/remove-from-others
+ * @desc    Manually remove user from other city groups
+ * @access  Private
+ */
+router.post('/city/remove-from-others', authenticate, asyncHandler(async (req, res) => {
+  const { city, state, country } = req.body;
+  
+  if (!city) {
+    return res.status(400).json({
+      success: false,
+      message: 'City name is required'
+    });
+  }
+
+  const result = await cityGroupService.removeFromOtherCityGroups(
+    req.user.id,
+    city,
+    state,
+    country
+  );
+
+  res.json({
+    success: result.success,
+    message: result.message,
+    data: result
+  });
+}));
+
+/**
+ * @route   GET /api/groups/city/my-memberships
+ * @desc    Get user's current city group memberships
+ * @access  Private
+ */
+router.get('/city/my-memberships', authenticate, asyncHandler(async (req, res) => {
+  const memberships = await cityGroupService.getUserCityGroupMemberships(req.user.id);
+
+  res.json({
+    success: true,
+    data: {
+      items: memberships,
+      total: memberships.length,
+      page: 1,
+      totalPages: 1
+    }
+  });
+}));
+
+/**
+ * @route   POST /api/groups/city/create
+ * @desc    Create new city group (admin only)
+ * @access  Private
+ */
+router.post('/city/create', authenticate, asyncHandler(async (req, res) => {
+  // Check if user is admin
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Only administrators can create city groups'
+    });
+  }
+
+  const { cityName, state, country } = req.body;
+  
+  if (!cityName) {
+    return res.status(400).json({
+      success: false,
+      message: 'City name is required'
+    });
+  }
+
+  const result = await cityGroupService.createCityGroup(
+    cityName,
+    state,
+    country,
+    {},
+    req.user.id
+  );
+
+  res.json({
+    success: true,
+    message: `City group "${cityName} Community" created successfully`,
+    data: result
+  });
+}));
+
+/**
+ * @route   GET /api/groups/street
+ * @desc    Get all street groups
+ * @access  Private
+ */
+router.get('/street', authenticate, asyncHandler(async (req, res) => {
+  const { page = 1, limit = 20, city, state, country } = req.query;
+  
+  const result = await cityGroupService.getStreetGroups({
+    page: parseInt(page),
+    limit: parseInt(limit),
+    city,
+    state,
+    country
+  });
+
+  res.json({
+    success: true,
+    data: result
+  });
+}));
+
+/**
+ * @route   POST /api/groups/street/create
+ * @desc    Create new street group (admin only)
+ * @access  Private
+ */
+router.post('/street/create', authenticate, asyncHandler(async (req, res) => {
+  // Check if user is admin
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Only administrators can create street groups'
+    });
+  }
+
+  const { streetName, city, state, country, formattedAddress, latitude, longitude } = req.body;
+  
+  if (!streetName || !city) {
+    return res.status(400).json({
+      success: false,
+      message: 'Street name and city are required'
+    });
+  }
+
+  const result = await cityGroupService.createStreetGroup(
+    streetName,
+    city,
+    state,
+    country,
+    formattedAddress,
+    latitude,
+    longitude,
+    req.user.id
+  );
+
+  res.json({
+    success: result.success,
+    message: result.message,
+    data: result.group
+  });
+}));
+
+/**
+ * @route   GET /api/groups/street/nearby
+ * @desc    Get nearby street groups
+ * @access  Private
+ */
+router.get('/street/nearby', authenticate, asyncHandler(async (req, res) => {
+  const { latitude, longitude, radius = 5 } = req.query;
+  
+  if (!latitude || !longitude) {
+    return res.status(400).json({
+      success: false,
+      message: 'Latitude and longitude are required'
+    });
+  }
+
+  const streetGroups = await cityGroupService.getNearbyStreetGroups(
+    parseFloat(latitude),
+    parseFloat(longitude),
+    parseFloat(radius)
+  );
+
+  res.json({
+    success: true,
+    data: {
+      items: streetGroups,
+      total: streetGroups.length
+    }
+  });
+}));
+
+/**
+ * @route   POST /api/groups/street/auto-join
+ * @desc    Auto-join user to street group based on location
+ * @access  Private
+ */
+router.post('/street/auto-join', authenticate, asyncHandler(async (req, res) => {
+  const { streetName, city, state, country, formattedAddress } = req.body;
+  
+  if (!streetName || !city) {
+    return res.status(400).json({
+      success: false,
+      message: 'Street name and city are required'
+    });
+  }
+
+  const result = await cityGroupService.autoJoinStreetGroup(
+    req.user.id,
+    streetName,
+    city,
+    state,
+    country,
+    formattedAddress
+  );
+
+  res.json({
+    success: result.success,
+    message: result.message,
+    data: result
+  });
+}));
+
+/**
+ * @route   POST /api/groups/street/remove-from-others
+ * @desc    Remove user from other street groups when location changes
+ * @access  Private
+ */
+router.post('/street/remove-from-others', authenticate, asyncHandler(async (req, res) => {
+  const { streetName, city, state, country, formattedAddress } = req.body;
+  
+  if (!streetName || !city) {
+    return res.status(400).json({
+      success: false,
+      message: 'Street name and city are required'
+    });
+  }
+
+  const result = await cityGroupService.removeFromOtherStreetGroups(
+    req.user.id,
+    streetName,
+    city,
+    state,
+    country,
+    formattedAddress
+  );
+
+  res.json({
+    success: result.success,
+    message: result.message,
+    data: result
+  });
+}));
+
+/**
+ * @route   GET /api/groups/street/my-memberships
+ * @desc    Get user's street group memberships
+ * @access  Private
+ */
+router.get('/street/my-memberships', authenticate, asyncHandler(async (req, res) => {
+  const memberships = await cityGroupService.getUserStreetGroupMemberships(req.user.id);
+
+  res.json({
+    success: true,
+    data: {
+      items: memberships,
+      total: memberships.length,
+      page: 1,
+      totalPages: 1
+    }
+  });
+}));
+
+/**
+ * @route   POST /api/groups/cleanup-duplicates
+ * @desc    Clean up duplicate groups (admin only)
+ * @access  Private
+ */
+router.post('/cleanup-duplicates', authenticate, asyncHandler(async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Only administrators can clean up duplicate groups'
+    });
+  }
+
+  const { category = 'city' } = req.body;
+  
+  if (!['city', 'street'].includes(category)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Category must be either "city" or "street"'
+    });
+  }
+
+  const result = await cityGroupService.cleanupDuplicateGroups(category);
+
+  res.json({
+    success: result.success,
+    message: result.message,
+    data: result
+  });
+}));
+
+/**
+ * @route   POST /api/groups/cleanup-all-duplicates
+ * @desc    Clean up all duplicate groups (admin only)
+ * @access  Private
+ */
+router.post('/cleanup-all-duplicates', authenticate, asyncHandler(async (req, res) => { 
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Only administrators can clean up duplicate groups'
+    });
+  }
+
+  const cityResult = await cityGroupService.cleanupDuplicateGroups('city');
+  const streetResult = await cityGroupService.cleanupDuplicateStreetGroups();
+
+  res.json({
+    success: cityResult.success && streetResult.success,
+    message: 'Cleanup completed',
+    data: {
+      city: cityResult,
+      street: streetResult
+    }
+  });
+}));
+
+/**
+ * @route   POST /api/groups/cleanup-street-duplicates
+ * @desc    Clean up duplicate street groups (admin only)
+ * @access  Private
+ */
+router.post('/cleanup-street-duplicates', authenticate, asyncHandler(async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Only administrators can clean up duplicate street groups'
+    });
+  }
+
+  const result = await cityGroupService.cleanupDuplicateStreetGroups();
+
+  res.json({
+    success: result.success,
+    message: result.message,
+    data: result
+  });
+}));
+
+/**
+ * @route   POST /api/groups/cleanup-user-memberships
+ * @desc    Clean up user's group memberships based on current location
+ * @access  Private
+ */
+router.post('/cleanup-user-memberships', authenticate, asyncHandler(async (req, res) => {
+  try {
+    const result = await cityGroupService.auditAndFixUserMemberships(req.user.id);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: result.message,
+        data: result.data
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: result.message,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to clean up user memberships',
+      error: error.message
+    });
+  }
+}));
+
+/**
+ * @route   POST /api/groups/remove-mismatched-memberships
+ * @desc    Remove and delete user from groups where location doesn't match
+ * @access  Private
+ */
+router.post('/remove-mismatched-memberships', authenticate, asyncHandler(async (req, res) => {
+  try {
+    const { city, state, country, street } = req.body;
+    
+    if (!city) {
+      return res.status(400).json({
+        success: false,
+        message: 'City is required'
+      });
+    }
+
+    const userLocation = { city, state, country, street };
+    const result = await cityGroupService.removeAndDeleteFromMismatchedGroups(req.user.id, userLocation);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: result.message,
+        data: result.data
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: result.message,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to remove mismatched memberships',
+      error: error.message
+    });
+  }
 }));
 
 export default router;

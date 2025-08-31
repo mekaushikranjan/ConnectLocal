@@ -429,7 +429,7 @@ export default (sequelize) => {
         {
           model: sequelize.models.User,
           as: 'reporter',
-          attributes: ['displayName', 'username', 'profileAvatar']
+          attributes: ['displayName', 'username', 'avatar_url']
         },
         {
           model: sequelize.models.User,
@@ -553,7 +553,7 @@ export default (sequelize) => {
   });
 
   Report.associate = (models) => {
-    Report.belongsTo(models.User, { as: 'reporter', foreignKey: 'reportedBy' });
+    Report.belongsTo(models.User, { as: 'reporter', foreignKey: 'reported_by' });
     Report.belongsTo(models.User, { as: 'assignedModerator', foreignKey: 'assigned_to' });
     Report.belongsTo(models.User, { as: 'reviewer', foreignKey: 'reviewed_by' });
     Report.hasMany(Report, { as: 'relatedReports', foreignKey: 'duplicate_of' });

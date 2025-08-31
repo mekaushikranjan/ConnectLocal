@@ -10,18 +10,23 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import 'express-async-errors';
 import 'dotenv/config';
+
+// Import Redis services
+import { connectRedis, testRedisConnection } from './config/redis.js';
+import RedisService from './services/redisService.js';
 
 // Import routes
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import postRoutes from './routes/posts.js';
 import jobRoutes from './routes/jobs.js';
+import jobApplicationRoutes from './routes/job-applications.js';
 import marketplaceRoutes from './routes/marketplace.js';
 import chatRoutes from './routes/chats.js';
+import messageRoutes from './routes/messages.js';
 import notificationRoutes from './routes/notifications.js';
 import locationRoutes from './routes/location.js';
 import adminRoutes from './routes/admin.js';
@@ -38,9 +43,10 @@ import privacyRoutes from './routes/privacy.js';
 // Import middleware
 import { errorHandler } from './middleware/errorHandler.js';
 import { logNetworkInfo, getLocalIP, getClientIP, getNetworkInterfaces } from './utils/networkUtils.js';
+import { rateLimiters } from './middleware/redisRateLimit.js';
 
-// Import socket handler
-import { initializeSocket, socketHandler } from './socket/socketHandler.js';
+// Import enhanced socket handler
+import RedisSocketHandler from './socket/redisSocketHandler.js';
 
 // Import cron service
 import cronService from './services/cronService.js';
@@ -48,17 +54,36 @@ import cronService from './services/cronService.js';
 // Import all models to ensure correct sync order
 import './models/index.js';
 
+
+
 const app = express();
 const server = createServer(app);
 
-// Initialize Socket.IO
-const io = initializeSocket(server);
+// Initialize Redis connection
+let redisConnected = false;
+try {
+  await connectRedis();
+  redisConnected = await testRedisConnection();
+  if (redisConnected) {
+    console.log('✅ Redis connected successfully');
+  }
+} catch (error) {
+ 
+}
 
-// Apply socket handler to initialized io instance
-socketHandler(io);
-
-// Make io accessible to routes
-app.set('io', io);
+// Initialize enhanced Socket.IO with Redis adapter
+let socketHandler = null;
+let io = null;
+try {
+  socketHandler = new RedisSocketHandler();
+  io = await socketHandler.initialize(server);
+  
+  // Make io accessible to routes
+  app.set('io', io);
+  app.set('socketHandler', socketHandler);
+} catch (error) {
+  // Continue without Socket.IO
+}
 
 // Security middleware
 app.use(helmet({
@@ -78,96 +103,61 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// CORS configuration for React Native - Universal Private Network Support
-const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? (process.env.CORS_ORIGIN === '*' ? true : [process.env.FRONTEND_URL, process.env.CORS_ORIGIN].filter(Boolean))
-    : [
-        // Localhost variations
-        "http://localhost:3000", 
-        "http://localhost:8081",
-        "exp://localhost:8081",
-        
-        // Common private network ranges
-        // 192.168.x.x (most common home networks)
-        /^https?:\/\/192\.168\.\d+\.\d+:\d+$/,
-        /^exp:\/\/192\.168\.\d+\.\d+:\d+$/,
-        
-        // 10.x.x.x (corporate/enterprise networks)
-        /^https?:\/\/10\.\d+\.\d+\.\d+:\d+$/,
-        /^exp:\/\/10\.\d+\.\d+\.\d+:\d+$/,
-        
-        // 172.16-31.x.x (corporate networks)
-        /^https?:\/\/172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+:\d+$/,
-        /^exp:\/\/172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+:\d+$/,
-        
-        // Specific IPs for development
-        "http://10.249.208.235:8081", 
-        "exp://10.249.208.235:8081", 
-        "http://10.39.204.235:8081",
-        "exp://10.39.204.235:8081",
-        "http://192.168.1.100:8081",
-        "exp://192.168.1.100:8081",
-        "http://192.168.0.100:8081", 
-        "exp://192.168.0.100:8081",
-        
-        // Allow any port for development flexibility
-        /^https?:\/\/192\.168\.\d+\.\d+:\d+$/,
-        /^exp:\/\/192\.168\.\d+\.\d+:\d+$/,
-        /^https?:\/\/10\.\d+\.\d+\.\d+:\d+$/,
-        /^exp:\/\/10\.\d+\.\d+\.\d+:\d+$/,
-        /^https?:\/\/172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+:\d+$/,
-        /^exp:\/\/172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+:\d+$/
-      ],
-  credentials: true,
-  optionsSuccessStatus: 200,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'User-Agent', 'X-Real-IP', 'X-Forwarded-For'],
-  exposedHeaders: ['Content-Length', 'X-Requested-With', 'X-Total-Count']
-};
-app.use(cors(corsOptions));
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 200, // limit each IP to 200 requests per windowMs (increased from 100)
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req) => {
-    // Skip rate limiting for health checks and certain endpoints
-    return req.path === '/health' || 
-           req.path === '/api/auth/resend-verification-public' ||
-           req.path === '/api/auth/verify-email';
-  }
-});
-
-// Apply rate limiting to API routes
-app.use('/api/', limiter);
-
-// Stricter rate limiting for auth routes
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // limit each IP to 20 requests per windowMs (increased from 5)
-  message: 'Too many authentication attempts, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req) => {
-    // Skip rate limiting for certain auth endpoints that might be called frequently
-    return req.path === '/health' || 
-           req.path === '/resend-verification' || 
-           req.path === '/verify-email';
-  }
-});
-app.use('/api/auth/', authLimiter);
-
-// Body parsing middleware
-app.use(compression());
+// Essential middleware first
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(compression());
+
+// CORS configuration for React Native - Universal Network Support
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps)
+    if (!origin) return callback(null, true);
+    
+    // In production, only allow configured origins
+    if (process.env.NODE_ENV === 'production') {
+      const configuredOrigins = [process.env.FRONTEND_URL, process.env.CORS_ORIGIN].filter(Boolean);
+      if (process.env.CORS_ORIGIN === '*' || configuredOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('Not allowed by CORS'));
+    }
+    
+    // In development, allow all origins for mobile app testing
+    callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'User-Agent', 'X-API-Key'],
+  exposedHeaders: ['Content-Length', 'X-Total-Count', 'X-Auth-Token']
+}));
+
+// Redis-based rate limiting
+if (process.env.NODE_ENV === 'production') {
+  app.use('/api/', rateLimiters.general);
+  app.use('/api/auth/', rateLimiters.auth);
+  app.use('/api/auth/login', rateLimiters.login);
+  app.use('/api/auth/register', rateLimiters.register);
+  app.use('/api/auth/forgot-password', rateLimiters.passwordReset);
+  app.use('/api/upload/', rateLimiters.upload);
+  app.use('/api/posts/', rateLimiters.postCreation);
+  app.use('/api/comments/', rateLimiters.comments);
+  app.use('/api/messages/', rateLimiters.messages);
+  app.use('/api/livechat/', rateLimiters.liveChat);
+  app.use('/api/search/', rateLimiters.search);
+  app.use('/api/notifications/', rateLimiters.notifications);
+}
+
+// Request logging for debugging
+app.use((req, res, next) => {
+  next();
+});
 
 // Serve static files
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// Serve uploaded files
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 
 
@@ -178,12 +168,28 @@ app.use((req, res, next) => {
 
 // Root endpoint for basic connectivity test
 app.get('/', (req, res) => {
+  const localIP = getLocalIP();
+  const port = process.env.PORT || 5000;
+  
   res.json({
     message: 'LocalConnect API is running!',
     status: 'OK',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    version: '1.0.0'
+    version: '1.0.0',
+    network: {
+      serverIP: localIP,
+      serverPort: port,
+      clientIP: getClientIP(req),
+      accessibleFrom: 'Any network (0.0.0.0)',
+      mobileReady: true
+    },
+    endpoints: {
+      api: `http://${localIP}:${port}/api`,
+      health: `http://${localIP}:${port}/health`,
+      networkInfo: `http://${localIP}:${port}/network-info`,
+      docs: `http://${localIP}:${port}/api-docs`
+    }
   });
 });
 
@@ -191,12 +197,11 @@ app.get('/', (req, res) => {
  * @swagger
  * /health:
  *   get:
- *     summary: Health check
- *     description: Check the health status of the API and database
- *     tags: [System]
+ *     summary: Health check endpoint
+ *     description: Check the health status of the API and its dependencies
  *     responses:
  *       200:
- *         description: System is healthy
+ *         description: API is healthy
  *         content:
  *           application/json:
  *             schema:
@@ -204,97 +209,76 @@ app.get('/', (req, res) => {
  *               properties:
  *                 status:
  *                   type: string
- *                   enum: [OK, ERROR]
- *                   example: OK
+ *                   example: "OK"
  *                 timestamp:
  *                   type: string
  *                   format: date-time
- *                   example: "2023-01-01T00:00:00.000Z"
- *                 uptime:
- *                   type: number
- *                   description: Server uptime in seconds
- *                   example: 3600
  *                 environment:
  *                   type: string
- *                   example: production
- *                 responseTime:
+ *                   example: "development"
+ *                 version:
  *                   type: string
- *                   example: "15ms"
+ *                   example: "1.0.0"
+ *                 redis:
+ *                   type: object
+ *                   properties:
+ *                     connected:
+ *                       type: boolean
+ *                     status:
+ *                       type: string
  *                 database:
  *                   type: object
  *                   properties:
+ *                     connected:
+ *                       type: boolean
  *                     status:
- *                       type: string
- *                       enum: [OK, ERROR]
- *                     dialect:
- *                       type: string
- *                       example: postgres
- *                     host:
- *                       type: string
- *                       example: localhost
- *       500:
- *         description: System is unhealthy
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: ERROR
- *                 timestamp:
- *                   type: string
- *                   format: date-time
- *                 uptime:
- *                   type: number
- *                 environment:
- *                   type: string
- *                 responseTime:
- *                   type: string
- *                 database:
- *                   type: object
- *                   properties:
- *                     status:
- *                       type: string
- *                       example: ERROR
- *                     error:
  *                       type: string
  */
-// Health check endpoint
 app.get('/health', async (req, res) => {
-  const startTime = Date.now();
-  let dbStatus = 'ERROR';
-  let statusCode = 500;
-  let errorMessage = null;
-
   try {
     // Test database connection
-    await sequelize.authenticate();
-    dbStatus = 'OK';
-    statusCode = 200;
-  } catch (error) {
-    // Database health check failed
-    errorMessage = error.message;
-  }
-
-  const responseTime = Date.now() - startTime;
-  const response = {
-    status: dbStatus === 'OK' ? 'OK' : 'ERROR',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV,
-    responseTime: `${responseTime}ms`,
-    database: {
-      status: dbStatus,
-      dialect: sequelize.getDialect(),
-      host: process.env.DB_HOST
+    let dbStatus = 'disconnected';
+    try {
+      await sequelize.authenticate();
+      dbStatus = 'connected';
+    } catch (error) {
+      dbStatus = 'error';
     }
-  };
 
+    // Test Redis connection
+    let redisStatus = 'disconnected';
+    if (redisConnected) {
+      try {
+        await RedisService.healthCheck();
+        redisStatus = 'connected';
+      } catch (error) {
+        redisStatus = 'error';
+      }
+    }
 
-
-  res.status(statusCode).json(response);
+    res.json({
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      version: '1.0.0',
+      redis: {
+        connected: redisConnected,
+        status: redisStatus
+      },
+      database: {
+        connected: dbStatus === 'connected',
+        status: dbStatus
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      timestamp: new Date().toISOString(),
+      error: error.message
+    });
+  }
 });
+
 
 /**
  * @swagger
@@ -360,24 +344,39 @@ app.get('/network-info', (req, res) => {
   const localIP = getLocalIP();
   const networkInterfaces = getNetworkInterfaces();
   const clientIP = getClientIP(req);
+  const port = process.env.PORT || 5000;
   
   res.json({
     success: true,
     data: {
       serverIP: localIP,
-      serverPort: process.env.PORT || 5000,
+      serverPort: port,
       clientIP: clientIP,
       networkInterfaces: networkInterfaces,
-      apiBaseUrl: `http://${localIP}:${process.env.PORT || 5000}/api`,
-      healthCheck: `http://${localIP}:${process.env.PORT || 5000}/health`,
+      apiBaseUrl: `http://${localIP}:${port}/api`,
+      socketUrl: `http://${localIP}:${port}`,
+      healthCheck: `http://${localIP}:${port}/health`,
       environment: process.env.NODE_ENV || 'development',
       corsEnabled: true,
+      timestamp: new Date().toISOString(),
       supportedNetworks: [
         '192.168.x.x (Home networks)',
         '10.x.x.x (Corporate networks)', 
         '172.16-31.x.x (Enterprise networks)',
         'localhost (Local development)'
-      ]
+      ],
+      mobileConfig: {
+        reactNative: {
+          apiUrl: `http://${localIP}:${port}/api`,
+          socketUrl: `http://${localIP}:${port}`,
+          timeout: 10000
+        },
+        expo: {
+          apiUrl: `http://${localIP}:${port}/api`,
+          socketUrl: `http://${localIP}:${port}`,
+          timeout: 10000
+        }
+      }
     }
   });
 });
@@ -385,8 +384,6 @@ app.get('/network-info', (req, res) => {
 // API documentation setup
 const setupSwaggerRoutes = async () => {
   try {
-    console.log('Setting up Swagger documentation...');
-    
     // Enable Swagger in all environments for better API documentation access
     const { default: swaggerUi } = await import('swagger-ui-express');
     const { default: swaggerSpec } = await import('./config/swagger.js');
@@ -437,13 +434,44 @@ const setupSwaggerRoutes = async () => {
 await setupSwaggerRoutes().catch(err => {
 });
 
-// API routes
+// Auto-add /api prefix for frontend requests
+app.use((req, res, next) => {
+  // Skip if request already has /api prefix or is for static files/docs
+  if (req.path.startsWith('/api/') || 
+      req.path.startsWith('/api-docs') || 
+      req.path.startsWith('/docs') || 
+      req.path === '/' || 
+      req.path === '/health' ||
+      req.path === '/network-info' ||
+      req.path.startsWith('/static/') ||
+      req.path.includes('.')) {
+    return next();
+  }
+  
+  // Redirect requests without /api prefix to include it
+  const newPath = `/api${req.path}`;
+  
+  // For GET requests, redirect
+  if (req.method === 'GET') {
+    return res.redirect(newPath);
+  }
+  
+  // For other methods (POST, PUT, DELETE, etc.), rewrite the URL
+  req.url = newPath;
+  next();
+});
+
+// Mount API routes after all middleware
+
+// Core routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/jobs', jobRoutes);
+app.use('/api/job-applications', jobApplicationRoutes);
 app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/chats', chatRoutes);
+app.use('/api/messages', messageRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/location', locationRoutes);
 app.use('/api/admin', adminRoutes);
@@ -472,24 +500,32 @@ app.use(errorHandler);
 // Database connection with better error handling
 const initializeDatabase = async () => {
   try {
+    
     await sequelize.authenticate();
+    console.log('✅ Database connected successfully');
 
     
-    // Database sync configuration
-    const forceSync = process.env.NODE_ENV === 'development' && process.env.FORCE_SYNC === 'true';
-    const alterSync = process.env.NODE_ENV === 'development' || process.env.ALTER_SYNC === 'true';
+    // Database sync configuration - PRESERVE DATA BY DEFAULT
+    const forceSync = process.env.FORCE_SYNC === 'true';
+    const alterSync = process.env.ALTER_SYNC === 'true';
     
+    // Prevent force sync in production
     if (process.env.NODE_ENV === 'production' && forceSync) {
       process.exit(1);
     }
     
-    // For development, force sync to fix schema issues
-    // If NODE_ENV is not set, treat as development
+    // Use conservative sync options to preserve data - ALWAYS SAFE BY DEFAULT
     const isDevelopment = !process.env.NODE_ENV || process.env.NODE_ENV === 'development';
-    const syncOptions = isDevelopment 
-      ? { force: true } // Force sync in development to fix schema issues
-      : { alter: alterSync && !forceSync }; // Use alter in production
+    let syncOptions = {};
     
+    if (forceSync) {
+      console.warn('⚠️  WARNING: Using FORCE_SYNC - this will DROP ALL TABLES and recreate them!');
+      syncOptions = { force: true };
+    } else {
+      // Always use safe sync by default - no automatic alter sync
+      syncOptions = {}; // Safe sync - only creates missing tables
+    }
+  
     // Database sync mode
     await sequelize.sync(syncOptions);
     
@@ -500,6 +536,7 @@ const initializeDatabase = async () => {
     
     return true;
   } catch (error) {
+   
     return false;
   }
 };
@@ -534,23 +571,33 @@ const startServer = async () => {
     const dbInitialized = await initializeDatabase();
     
     if (!dbInitialized) {
+     
       process.exit(1);
     }
     
-         // Start the server
-     server.listen(PORT, '0.0.0.0', () => {
-       const baseUrl = process.env.NODE_ENV === 'production' 
-         ? `https://${process.env.FRONTEND_URL?.replace('https://', '').replace('http://', '') || 'localhost'}:${PORT}`
-         : `http://localhost:${PORT}`;
-         
-                if (process.env.NODE_ENV === 'development') {
-           // Log comprehensive network information for mobile device connectivity
-           logNetworkInfo(PORT);
-           
-           const localIP = getLocalIP();
-           const networkUrl = `http://${localIP}:${PORT}`;
-         }
-     });
+    // Start the server
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Server started on port ${PORT}`);
+      console.log(`🌐 Server is accessible from any network interface`);
+      
+      const localIP = getLocalIP();
+      const networkInterfaces = getNetworkInterfaces();
+      
+      console.log(`📱 Mobile App Connection URLs:`);
+      console.log(`   Local: http://localhost:${PORT}/api`);
+      console.log(`   Network: http://${localIP}:${PORT}/api`);
+      console.log(`   Health Check: http://${localIP}:${PORT}/health`);
+      console.log(`   Network Info: http://${localIP}:${PORT}/network-info`);
+      
+      console.log(`🔧 Available Network Interfaces:`);
+      Object.keys(networkInterfaces).forEach(interfaceName => {
+        networkInterfaces[interfaceName].forEach(netIf => {
+        });
+      });
+      if (process.env.NODE_ENV === 'development') {
+        
+      }
+    });
     
   } catch (error) {
     process.exit(1);

@@ -36,6 +36,13 @@ export default (sequelize) => {
       }
     }
   },
+  // Virtual field for backward compatibility
+  company: {
+    type: DataTypes.VIRTUAL,
+    get() {
+      return this.companyData?.name || 'Unknown Company';
+    }
+  },
   
   // Job Details
   type: {
@@ -60,6 +67,13 @@ export default (sequelize) => {
   address: {
     type: DataTypes.JSONB,
     defaultValue: {}
+  },
+  // Virtual field for backward compatibility
+  location: {
+    type: DataTypes.VIRTUAL,
+    get() {
+      return this.address?.city || this.address?.state || 'Location not specified';
+    }
   },
   microCommunityId: {
     type: DataTypes.STRING,

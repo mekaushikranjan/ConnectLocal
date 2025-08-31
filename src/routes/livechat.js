@@ -3,6 +3,7 @@ import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { LiveChat, LiveChatMessage, User, Notification } from '../models/index.js';
 import { Op } from 'sequelize';
+import { getIO } from '../socket/socketHandler.js';
 
 const router = express.Router();
 
@@ -77,6 +78,16 @@ router.post('/start', authenticate, asyncHandler(async (req, res) => {
       // Don't fail the request if notifications fail
   }
 
+  // Emit socket event to notify admins about new session
+  try {
+    const io = getIO();
+    if (io) {
+      io.emit('new_live_chat_session', chat.id);
+    }
+  } catch (error) {
+    console.error('Failed to emit socket event for new live chat session:', error);
+  }
+
   res.json({
     success: true,
     message: 'Live chat session started',
@@ -148,6 +159,22 @@ router.post('/sessions/:id/join', authenticate, asyncHandler(async (req, res) =>
       }
     ]
   });
+
+  // Emit socket event to notify user that admin has joined
+  try {
+    const io = getIO();
+    if (io) {
+      io.to(`live_chat_${req.params.id}`).emit('admin_joined_live_chat', {
+        sessionId: req.params.id,
+        admin: {
+          id: req.user.id,
+          displayName: req.user.displayName
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Failed to emit socket event for admin joined:', error);
+  }
 
   res.json({
     success: true,

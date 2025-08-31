@@ -6,33 +6,51 @@ import path from 'path';
 import crypto from 'crypto';
 import sharp from 'sharp';
 import fetch from 'node-fetch';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const router = express.Router();
 
-// Cloudflare R2 configuration
-const R2_ENDPOINT = process.env.R2_ENDPOINT || `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`;
-const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY_ID;
-const R2_SECRET_KEY = process.env.R2_SECRET_ACCESS_KEY;
-const R2_BUCKET = process.env.R2_BUCKET_NAME;
-const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL;
 
-// Function to generate authorization headers for R2
-const getR2Headers = (method, pathname, contentType = '') => {
-  const date = new Date().toUTCString();
-  const stringToSign = `${method}\n\n${contentType}\n${date}\n/${R2_BUCKET}${pathname}`;
-  
-  const signature = crypto
-    .createHmac('sha1', R2_SECRET_KEY)
-    .update(stringToSign)
-    .digest('base64');
 
-  return {
-    'Date': date,
-    'Authorization': `AWS ${R2_ACCESS_KEY}:${signature}`,
-    'Host': new URL(R2_ENDPOINT).host,
-    ...(contentType && { 'Content-Type': contentType })
-  };
+// Cloudflare R2 Configuration - Using environment variables
+const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || '448be2f47f1d28726807c826a16ff120';
+const CLOUDFLARE_R2_BUCKET_NAME = process.env.CLOUDFLARE_R2_BUCKET_NAME || 'connectlocal';
+const CLOUDFLARE_R2_PUBLIC_URL = process.env.CLOUDFLARE_R2_PUBLIC_URL || 'https://pub-d2e3f27d6f38479da7edf652022364b1.r2.dev';
+
+
+
+// Check if R2 is properly configured - using API token instead of S3 credentials
+const isR2Configured = process.env.CLOUDFLARE_API_TOKEN && CLOUDFLARE_ACCOUNT_ID;
+
+
+
+// Function to upload to R2 using Cloudflare API
+const uploadToR2 = async (buffer, key, contentType) => {
+  const uploadResponse = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${CLOUDFLARE_R2_BUCKET_NAME}/objects/${key}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
+        'Content-Type': contentType,
+        'Content-Length': buffer.length.toString()
+      },
+      body: buffer
+    }
+  );
+
+  if (!uploadResponse.ok) {
+    const errorText = await uploadResponse.text();
+    throw new Error(`Failed to upload to R2: ${uploadResponse.status} ${uploadResponse.statusText} - ${errorText}`);
+  }
+
+  return true;
 };
+
+
 
 // Configure multer for memory storage
 const upload = multer({
@@ -41,7 +59,18 @@ const upload = multer({
     fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024, // Use env or default to 10MB
   },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = (process.env.ALLOWED_IMAGE_TYPES || 'image/jpeg,image/png,image/gif,image/webp').split(',');
+    // Explicitly define allowed types to ensure audio files are supported
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png', 
+      'image/gif',
+      'image/webp',
+      'audio/m4a',
+      'audio/mp3',
+      'audio/wav',
+      'audio/aac'
+    ];
+    
     if (!allowedTypes.includes(file.mimetype)) {
       cb(new Error(`Invalid file type. Only ${allowedTypes.join(', ')} are allowed.`));
     } else {
@@ -55,7 +84,7 @@ const generateFilename = (originalname) => {
   const timestamp = Date.now();
   const random = crypto.randomBytes(8).toString('hex');
   const extension = path.extname(originalname);
-  return `${timestamp}-${random}${extension}`;
+  return `${timestamp}-${random}${extension}`;    
 };
 
 /**
@@ -122,7 +151,7 @@ const generateFilename = (originalname) => {
  *                       type: string
  *                       format: uri
  *                       description: Public URL of uploaded image
- *                       example: "https://cdn.localconnect.com/uploads/avatars/1234567890-abc123.webp"
+ *                       example: "https://pub-2e0b327bc8804069a7ca1cb5329d6296.r2.dev/uploads/avatars/1234567890-abc123.webp"
  *                     filename:
  *                       type: string
  *                       description: Generated filename
@@ -162,72 +191,95 @@ router.post('/image', authenticate, upload.single('image'), asyncHandler(async (
   if (!req.file) {
     return res.status(400).json({
       success: false,
-      message: 'No image file provided'
+      message: 'No file provided'
     });
   }
 
   const { type = 'general', width, height, quality = process.env.DEFAULT_IMAGE_QUALITY || 80 } = req.body;
 
-  // Process image with sharp
-  let processedImage = sharp(req.file.buffer);
+  try {
+    let processedBuffer;
+    let filename;
+    let contentType;
+    let uploadPath = 'uploads/';
 
-  // Resize if dimensions provided
-  if (width || height) {
-    processedImage = processedImage.resize(
-      width ? parseInt(width) : null,
-      height ? parseInt(height) : null,
-      { fit: 'inside', withoutEnlargement: true }
-    );
-  }
+    // Check if it's an audio file
+    if (req.file.mimetype.startsWith('audio/')) {
+      // Handle audio files
+      processedBuffer = req.file.buffer; // No processing for audio files
+      filename = generateFilename(req.file.originalname);
+      contentType = req.file.mimetype;
+      
+      // Define upload path for audio files
+      switch (type) {
+        case 'message':
+          uploadPath += 'messages/';
+          break;
+        default:
+          uploadPath += 'audio/';
+      }
+    } else {
+      // Handle image files
+      let processedImage = sharp(req.file.buffer);
 
-  // Convert to WebP for better compression
-  processedImage = processedImage.webp({ quality: parseInt(quality) });
+      // Resize if dimensions provided
+      if (width || height) {
+        processedImage = processedImage.resize(
+          width ? parseInt(width) : null,
+          height ? parseInt(height) : null,
+          { fit: 'inside', withoutEnlargement: true }
+        );
+      }
 
-  const optimizedBuffer = await processedImage.toBuffer();
+      // Convert to WebP for better compression
+      processedImage = processedImage.webp({ quality: parseInt(quality) });
 
-  // Generate unique filename
-  const filename = generateFilename(req.file.originalname).replace(/\.[^/.]+$/, '.webp');
+      processedBuffer = await processedImage.toBuffer();
+      filename = generateFilename(req.file.originalname).replace(/\.[^/.]+$/, '.webp');
+      contentType = 'image/webp';
 
-  // Define R2 path based on type
-  let r2Path = 'uploads/';
-  switch (type) {
-    case 'avatar':
-      r2Path += 'avatars/';
-      break;
-    case 'post':
-      r2Path += 'posts/';
-      break;
-    case 'marketplace':
-      r2Path += 'marketplace/';
-      break;
-    default:
-      r2Path += 'general/';
-  }
-
-  // Upload to R2
-  const filePath = `/${r2Path}${filename}`;
-  const headers = getR2Headers('PUT', filePath, 'image/webp');
-  
-  const uploadResponse = await fetch(`${R2_ENDPOINT}/${R2_BUCKET}${filePath}`, {
-    method: 'PUT',
-    headers: headers,
-    body: optimizedBuffer
-  });
-
-  if (!uploadResponse.ok) {
-    throw new Error(`Failed to upload to R2: ${uploadResponse.statusText}`);
-  }
-
-  // Construct the public URL
-  const imageUrl = `${process.env.R2_PUBLIC_URL}${filePath}`;
-
-  res.status(201).json({
-    success: true,
-    data: {
-      url: imageUrl,
-      key: filePath.slice(1) // Remove leading slash
+      // Define upload path for images
+      switch (type) {
+        case 'avatar':
+          uploadPath += 'avatars/';
+          break;
+        case 'post':
+          uploadPath += 'posts/';
+          break;
+        case 'marketplace':
+          uploadPath += 'marketplace/';
+          break;
+        default:
+          uploadPath += 'general/';
+      }
     }
-  });
+
+    const key = `${uploadPath}${filename}`;
+
+    // Upload to R2
+    if (!isR2Configured) {
+      throw new Error('R2 is not properly configured');
+    }
+
+    await uploadToR2(processedBuffer, key, contentType);
+    const fileUrl = `${CLOUDFLARE_R2_PUBLIC_URL}/${key}`;
+
+    const message = req.file.mimetype.startsWith('audio/') ? 'Audio uploaded successfully' : 'Image uploaded successfully';
+
+    res.status(201).json({
+      success: true,
+      message: message,
+      data: {
+        url: fileUrl,
+        key: key,
+        filename: filename,
+        size: processedBuffer.length,
+        type: type
+      }
+    });
+  } catch (error) {
+    throw new Error(`File processing failed: ${error.message}`);
+  }
 }));
 
 /**
@@ -247,64 +299,66 @@ router.post('/images', authenticate, upload.array('images', 10), asyncHandler(as
   const uploadResults = [];
 
   for (const file of req.files) {
-    // Process image with sharp
-    let processedImage = sharp(file.buffer);
+    try {
+      // Process image with sharp
+      let processedImage = sharp(file.buffer);
 
-    // Resize if dimensions provided
-    if (width || height) {
-      processedImage = processedImage.resize(
-        width ? parseInt(width) : null,
-        height ? parseInt(height) : null,
-        { fit: 'inside', withoutEnlargement: true }
-      );
+      // Resize if dimensions provided
+      if (width || height) {
+        processedImage = processedImage.resize(
+          width ? parseInt(width) : null,
+          height ? parseInt(height) : null,
+          { fit: 'inside', withoutEnlargement: true }
+        );
+      }
+
+      // Convert to WebP
+      processedImage = processedImage.webp({ quality: parseInt(quality) });
+
+      const optimizedBuffer = await processedImage.toBuffer();
+
+      // Generate unique filename
+      const filename = generateFilename(file.originalname).replace(/\.[^/.]+$/, '.webp');
+
+      // Define upload path based on type
+      let uploadPath = 'uploads/';
+      switch (type) {
+        case 'post':
+          uploadPath += 'posts/';
+          break;
+        case 'marketplace':
+          uploadPath += 'marketplace/';
+          break;
+        default:
+          uploadPath += 'general/';
+      }
+
+      const key = `${uploadPath}${filename}`;
+      const contentType = 'image/webp';
+
+      // Upload to R2
+      if (!isR2Configured) {
+        throw new Error('R2 is not properly configured');
+      }
+
+      await uploadToR2(optimizedBuffer, key, contentType);
+      const imageUrl = `${CLOUDFLARE_R2_PUBLIC_URL}/${key}`;
+
+      uploadResults.push({
+        url: imageUrl,
+        key: key,
+        filename: filename,
+        size: optimizedBuffer.length,
+        type: type
+      });
+    } catch (error) {
+      throw new Error(`Failed to process image: ${error.message}`);
     }
-
-    // Convert to WebP
-    processedImage = processedImage.webp({ quality: parseInt(quality) });
-
-    const optimizedBuffer = await processedImage.toBuffer();
-
-    // Generate unique filename
-    const filename = generateFilename(file.originalname).replace(/\.[^/.]+$/, '.webp');
-
-    // Define S3 path based on type
-    let s3Path = 'uploads/';
-    switch (type) {
-      case 'post':
-        s3Path += 'posts/';
-        break;
-      case 'marketplace':
-        s3Path += 'marketplace/';
-        break;
-      default:
-        s3Path += 'general/';
-    }
-
-    // Upload to R2
-    const filePath = `/${s3Path}${filename}`;
-    const headers = getR2Headers('PUT', filePath, 'image/webp');
-    
-    const uploadResponse = await fetch(`${R2_ENDPOINT}/${R2_BUCKET}${filePath}`, {
-      method: 'PUT',
-      headers: headers,
-      body: optimizedBuffer
-    });
-
-    if (!uploadResponse.ok) {
-      throw new Error(`Failed to upload to R2: ${uploadResponse.statusText}`);
-    }
-
-    // Construct the public URL
-    const imageUrl = `${process.env.R2_PUBLIC_URL}${filePath}`;
-
-    uploadResults.push({
-      url: imageUrl,
-      key: filePath.slice(1) // Remove leading slash
-    });
   }
 
   res.status(201).json({
     success: true,
+    message: 'Images uploaded successfully',
     data: { images: uploadResults }
   });
 }));
@@ -317,22 +371,74 @@ router.post('/images', authenticate, upload.array('images', 10), asyncHandler(as
 router.delete('/:key(*)', authenticate, asyncHandler(async (req, res) => {
   const key = req.params.key;
 
-  // Delete from R2
-  const filePath = `/${key}`;
-  const headers = getR2Headers('DELETE', filePath);
-  
-  const deleteResponse = await fetch(`${R2_ENDPOINT}/${R2_BUCKET}${filePath}`, {
-    method: 'DELETE',
-    headers: headers
-  });
+  try {
+    if (!isR2Configured) {
+      throw new Error('R2 is not properly configured');
+    }
 
-  if (!deleteResponse.ok) {
-    throw new Error(`Failed to delete from R2: ${deleteResponse.statusText}`);
+    const deleteResponse = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets/${CLOUDFLARE_R2_BUCKET_NAME}/objects/${key}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`
+        }
+      }
+    );
+
+    if (deleteResponse.ok) {
+      return res.json({
+        success: true,
+        message: 'File deleted successfully'
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+  } catch (error) {
+    throw new Error(`Failed to delete file: ${error.message}`);
+  }
+}));
+
+/**
+ * @route   GET /api/upload/test
+ * @desc    Test upload service
+ * @access  Private
+ */
+router.get('/test', authenticate, asyncHandler(async (req, res) => {
+  let r2Status = 'Not Configured';
+  
+  if (isR2Configured) {
+    try {
+      const testResponse = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/r2/buckets`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      r2Status = testResponse.ok ? 'Connected' : 'Connection Failed';
+    } catch (error) {
+      r2Status = 'Connection Error';
+    }
   }
 
   res.json({
     success: true,
-    message: 'File deleted successfully'
+    message: 'Upload service is working',
+    data: {
+      r2Status: r2Status,
+      r2Bucket: CLOUDFLARE_R2_BUCKET_NAME,
+      r2PublicUrl: CLOUDFLARE_R2_PUBLIC_URL,
+      maxFileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024,
+      allowedTypes: (process.env.ALLOWED_IMAGE_TYPES || 'image/jpeg,image/png,image/gif,image/webp').split(',')
+    }
   });
 }));
 

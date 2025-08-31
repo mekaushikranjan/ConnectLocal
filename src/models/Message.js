@@ -1,5 +1,6 @@
 
 export default (sequelize, DataTypes) => {
+  const { Op } = sequelize.Sequelize;
   const Message = sequelize.define('Message', {
     id: {
       type: DataTypes.UUID,
@@ -38,6 +39,18 @@ export default (sequelize, DataTypes) => {
     content: {
       type: DataTypes.JSONB,
       defaultValue: {}
+    },
+    
+    // Media Information (for images, videos, audio, files)
+    media: {
+      type: DataTypes.JSONB,
+      defaultValue: null
+    },
+    
+    // Location Information
+    location: {
+      type: DataTypes.JSONB,
+      defaultValue: null
     },
     
     // Message Type
@@ -215,7 +228,8 @@ export default (sequelize, DataTypes) => {
 
   Message.prototype.getContentPreview = function() {
     if (this.type === 'text') {
-      return this.content.text?.substring(0, 100) + (this.content.text?.length > 100 ? '...' : '');
+      const text = this.content?.text || this.content || '';
+      return text.substring(0, 100) + (text.length > 100 ? '...' : '');
     } else if (this.type === 'image') {
       return '📷 Photo';
     } else if (this.type === 'video') {
@@ -313,142 +327,87 @@ export default (sequelize, DataTypes) => {
 // Method to edit message
 Message.prototype.editMessage = async function(newContent) {
   // Add to edit history
+  const currentContent = this.content?.text || this.content || '';
   this.editHistory.push({
-    content: this.content.text,
+    content: currentContent,
     editedAt: new Date()
   });
   
-  // Update content
-  this.content.text = newContent;
+  // Update content - handle both string and object formats
+  if (typeof newContent === 'string') {
+    this.content = { text: newContent };
+  } else {
+    this.content = newContent;
+  }
+  
   this.isEdited = true;
   this.editedAt = new Date();
   
   return this.save();
 };
 
-// Method to delete message for user
-Message.prototype.deleteForUser = async function(userId) {
-  this.deletedFor.push({
-    user: userId,
-    deletedAt: new Date()
-  });
-  
-  return this.save();
-};
 
-// Method to delete message for everyone
-Message.prototype.deleteForEveryone = async function() {
-  this.isDeleted = true;
-  this.deletedAt = new Date();
-  this.content = { text: 'This message was deleted' };
-  
-  return this.save();
-};
 
-// Method to check if message is deleted for user
-Message.prototype.isDeletedForUser = function(userId) {
-  return this.isDeleted || this.deletedFor.some(d => 
-    d.user.toString() === userId.toString()
-  );
-};
 
-// Method to check if message is expired (disappearing message)
-Message.prototype.isExpired = function() {
-  return this.disappearing.isDisappearing && 
-         this.disappearing.expiresAt && 
-         new Date() > this.disappearing.expiresAt;
-};
 
-// Method to get message for user (with user-specific filtering)
-Message.prototype.getForUser = function(userId) {
-  if (this.isDeletedForUser(userId)) {
-    return null;
-  }
-  
-  if (this.isExpired()) {
-    return null;
-  }
-  
-  const message = this.toJSON();
-  
-  // Add user-specific reaction status
-  message.userReaction = this.reactions.find(r => 
-    r.user.toString() === userId.toString()
-  )?.emoji || null;
-  
-  // Add read status for user
-  message.isReadByUser = this.readBy.some(r => 
-    r.user.toString() === userId.toString()
-  );
-  
-  return message;
-};
-
-// Static method to get messages for chat
-Message.findMessagesForChat = async function(chatId, userId, options = {}) {
-  const query = {
-    chat: chatId,
-    $or: [
-      { isDeleted: false },
-      { isDeleted: { $exists: false } }
-    ]
-  };
-  
-  // Filter out messages deleted for this user
-  query['deletedFor.user'] = { $ne: userId };
-  
-  // Filter out expired disappearing messages
-  query.$and = [
-    {
-      $or: [
-        { 'disappearing.isDisappearing': false },
-        { 'disappearing.isDisappearing': { $exists: false } },
-        { 'disappearing.expiresAt': { $gt: new Date() } }
+  // Static methods
+  Message.findMessagesForChat = async function(chatId, userId, options = {}) {
+    const whereClause = {
+      chatId: chatId,
+      [Op.or]: [
+        { isDeleted: false },
+        { isDeleted: null }
       ]
+    };
+    
+    const include = [
+      {
+        model: sequelize.models.User,
+        as: 'sender',
+        attributes: ['id', 'displayName', 'username']
+      }
+    ];
+    
+    const queryOptions = {
+      where: whereClause,
+      include: include,
+      order: [['createdAt', 'DESC']]
+    };
+    
+    if (options.limit) {
+      queryOptions.limit = options.limit;
     }
-  ];
-  
-  let queryBuilder = this.find(query)
-    .populate('sender.id', 'displayName username profile.avatar')
-    .populate('replyTo.sender.id', 'displayName username')
-    .sort({ createdAt: -1 });
-  
-  if (options.limit) {
-    queryBuilder = queryBuilder.limit(options.limit);
-  }
-  
-  if (options.skip) {
-    queryBuilder = queryBuilder.skip(options.skip);
-  }
-  
-  return queryBuilder;
-};
+    
+    if (options.offset) {
+      queryOptions.offset = options.offset;
+    }
+    
+    return this.findAll(queryOptions);
+  };
 
-// Static method to get unread messages count for user in chat
-Message.getUnreadCountForUserInChat = async function(chatId, userId, lastReadAt) {
-  return this.countDocuments({
-    chat: chatId,
-    'sender.id': { $ne: userId },
-    createdAt: { $gt: lastReadAt },
-    isDeleted: { $ne: true },
-    'deletedFor.user': { $ne: userId }
-  });
-};
-
-// Pre-save middleware to update chat's last message
-Message.afterCreate(async (message, options) => {
-  if (!message.isDeleted) {
-    await sequelize.models.Chat.update({
-      lastMessageContent: message.getContentPreview(),
-      lastMessageSenderId: message.senderId,
-      lastMessageTimestamp: message.createdAt,
-      lastMessageType: message.type,
-      messageCount: sequelize.literal('messageCount + 1')
-    }, {
-      where: { id: message.chatId }
+  Message.getUnreadCountForUserInChat = async function(chatId, userId, lastReadAt) {
+    return this.count({
+      where: {
+        chatId: chatId,
+        senderId: { [Op.ne]: userId },
+        createdAt: { [Op.gt]: lastReadAt },
+        isDeleted: { [Op.ne]: true }
+      }
     });
-  }
-});
+  };
+
+  // Define associations
+  Message.associate = (models) => {
+    Message.belongsTo(models.Chat, {
+      foreignKey: 'chatId',
+      as: 'chat'
+    });
+    
+    Message.belongsTo(models.User, {
+      foreignKey: 'senderId',
+      as: 'sender'
+    });
+  };
 
   return Message;
 };

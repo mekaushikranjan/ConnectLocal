@@ -3,6 +3,8 @@ import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { User, LocationSettings, LocationHistory } from '../models/index.js';
 import { Op, Sequelize } from 'sequelize';
+import cityGroupService from '../services/cityGroupService.js';
+import { parseFormattedAddress } from '../utils/locationUtils.js';
 
 const router = express.Router();
 
@@ -70,19 +72,50 @@ router.get('/nearby-users', authenticate, asyncHandler(async (req, res) => {
 
 /**
  * @route   PUT /api/location/update
- * @desc    Update user's location
+ * @desc    Update user's location and auto-join city group
  * @access  Private
  */
 router.put('/update', authenticate, asyncHandler(async (req, res) => {
-  const { latitude, longitude, address } = req.body;
+  const { 
+    latitude, 
+    longitude, 
+    address,
+    location_city,
+    location_state,
+    location_country,
+    location_street,
+    location_postal_code,
+    location_formatted_address
+  } = req.body;
 
   const user = await User.findByPk(req.user.id);
+  
+  // Update location fields
   user.latitude = latitude;
   user.longitude = longitude;
+  user.location_city = location_city;
+  user.location_state = location_state;
+  user.location_country = location_country;
+  user.location_street = location_street;
+  user.location_postal_code = location_postal_code;
+  user.location_formatted_address = location_formatted_address;
+  user.location_last_updated = new Date();
+  
   if (address) {
     user.address = address;
   }
+  
   await user.save();
+
+  // Process group memberships based on new location
+  let membershipResult = null;
+  if (location_city || location_street) {
+    try {
+      membershipResult = await cityGroupService.auditAndFixUserMemberships(req.user.id);
+        } catch (error) {
+      // Don't fail the location update if membership processing fails
+    }
+  }
 
   res.json({
     success: true,
@@ -90,7 +123,11 @@ router.put('/update', authenticate, asyncHandler(async (req, res) => {
     data: {
       latitude: user.latitude,
       longitude: user.longitude,
-      address: user.address
+      address: user.address,
+      location_city: user.location_city,
+      location_state: user.location_state,
+      location_country: user.location_country,
+      membershipResult
     }
   });
 }));
@@ -194,16 +231,105 @@ router.post('/update-current', authenticate, asyncHandler(async (req, res) => {
     locationName, 
     formattedAddress, 
     accuracy, 
-    source = 'auto' 
+    source = 'auto',
+    // Direct location components from frontend
+    location_city,
+    location_state,
+    location_country,
+    location_street,
+    location_postal_code
   } = req.body;
+
+  // Use direct location components if available, otherwise parse formatted address
+  let addressComponents = {};
+  if (location_city || location_street) {
+    // Use direct location components from frontend
+    addressComponents = {
+      street: location_street || '',
+      city: location_city || '',
+      state: location_state || '',
+      country: location_country || '',
+      postalCode: location_postal_code || ''
+    };
+  } else {
+    // Fallback to parsing formatted address
+    addressComponents = parseFormattedAddress(formattedAddress);
+  }
+
+
 
   // Update user's current location
   const user = await User.findByPk(req.user.id);
   user.latitude = latitude;
   user.longitude = longitude;
   user.location_formatted_address = formattedAddress;
+  user.location_street = addressComponents.street;
+  user.location_city = addressComponents.city;
+  user.location_state = addressComponents.state;
+  user.location_country = addressComponents.country;
+  user.location_postal_code = addressComponents.postalCode;
   user.location_last_updated = new Date();
   await user.save();
+
+
+
+  // Auto-join city group if city information is available
+  let autoJoinResult = null;
+  if (addressComponents.city) {
+    try {
+
+
+      autoJoinResult = await cityGroupService.processLocationUpdate(req.user.id, {
+        location_city: addressComponents.city,
+        location_state: addressComponents.state,
+        location_country: addressComponents.country
+      });
+
+
+      
+    } catch (error) {
+      // Don't fail the location update if auto-join fails
+    }
+  }
+
+  // Auto-join street group if street information is available
+  let streetAutoJoinResult = null;
+  if (addressComponents.street && addressComponents.city) {
+    try {
+
+
+      // First remove from other street groups
+      const removeResult = await cityGroupService.removeFromOtherStreetGroups(
+        req.user.id,
+        addressComponents.street,
+        addressComponents.city,
+        addressComponents.state,
+        addressComponents.country,
+        formattedAddress
+      );
+
+      // Then auto-join to current street group
+      const joinResult = await cityGroupService.autoJoinStreetGroup(
+        req.user.id,
+        addressComponents.street,
+        addressComponents.city,
+        addressComponents.state,
+        addressComponents.country,
+        formattedAddress
+      );
+
+      streetAutoJoinResult = {
+        removeResult,
+        joinResult
+      };
+
+
+
+    } catch (error) {
+      console.error('❌ Error in street group auto-join:', error);
+      // Don't fail the location update if street auto-join fails
+    }
+  }
 
   // Get location settings
   const settings = await LocationSettings.getUserSettings(req.user.id);
@@ -233,7 +359,14 @@ router.post('/update-current', authenticate, asyncHandler(async (req, res) => {
       latitude: user.latitude,
       longitude: user.longitude,
       formattedAddress: user.location_formatted_address,
-      lastUpdated: user.location_last_updated
+      locationStreet: user.location_street,
+      locationCity: user.location_city,
+      locationState: user.location_state,
+      locationCountry: user.location_country,
+      locationPostalCode: user.location_postal_code,
+      lastUpdated: user.location_last_updated,
+      autoJoinResult,
+      streetAutoJoinResult
     }
   });
 }));
@@ -257,6 +390,15 @@ router.post('/set-custom', authenticate, asyncHandler(async (req, res) => {
     user.latitude = latitude;
     user.longitude = longitude;
     user.location_formatted_address = formattedAddress || locationName;
+    
+    // Parse formatted address into individual components
+    const addressComponents = parseFormattedAddress(formattedAddress || locationName);
+    user.location_street = addressComponents.street;
+    user.location_city = addressComponents.city;
+    user.location_state = addressComponents.state;
+    user.location_country = addressComponents.country;
+    user.location_postal_code = addressComponents.postalCode;
+    
     user.location_last_updated = new Date();
     await user.save();
 
@@ -319,6 +461,39 @@ router.get('/search', authenticate, asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: { locations: mockLocations }
+  });
+}));
+
+/**
+ * @route   POST /api/location/check
+ * @desc    Check and parse location data from formatted address
+ * @access  Private
+ */
+router.post('/check', authenticate, asyncHandler(async (req, res) => {
+  const { formattedAddress } = req.body;
+
+  if (!formattedAddress) {
+    return res.status(400).json({
+      success: false,
+      message: 'Formatted address is required'
+    });
+  }
+
+  // Parse the formatted address
+  const addressComponents = parseFormattedAddress(formattedAddress);
+
+  res.json({
+    success: true,
+    message: 'Location parsed successfully',
+    data: {
+      originalAddress: formattedAddress,
+      parsedComponents: addressComponents,
+      street: addressComponents.street,
+      city: addressComponents.city,
+      state: addressComponents.state,
+      country: addressComponents.country,
+      postalCode: addressComponents.postalCode
+    }
   });
 }));
 

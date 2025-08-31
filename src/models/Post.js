@@ -30,10 +30,9 @@ export default (sequelize) => {
     },
     
     // Author Information
-    authorId: {
+    author_id: {
       type: DataTypes.UUID,
       allowNull: false,
-      field: 'author_id', // map to existing DB column
       references: {
         model: 'users',
         key: 'id'
@@ -65,6 +64,7 @@ export default (sequelize) => {
       allowNull: true,
       field: 'location_street'
     },
+
     locationCity: {
       type: DataTypes.STRING,
       allowNull: true,
@@ -89,6 +89,36 @@ export default (sequelize) => {
       type: DataTypes.TEXT,
       allowNull: true,
       field: 'location_formatted_address'
+    },
+    // Virtual field for formatted location
+    location: {
+      type: DataTypes.VIRTUAL,
+      get() {
+        // Priority order for location display:
+        // 1. Street + City + State (most specific for micro feed)
+        // 2. Street + City (for micro feed fallback)
+        // 3. City + State (for city feed)
+        // 4. Formatted address (fallback)
+        // 5. City only (minimal)
+        
+        if (this.locationStreet && this.locationCity && this.locationState) {
+          // For micro feed: show street, city and state
+          return `${this.locationStreet}, ${this.locationCity}, ${this.locationState}`;
+        } else if (this.locationStreet && this.locationCity) {
+          // For micro feed: show street and city
+          return `${this.locationStreet}, ${this.locationCity}`;
+        } else if (this.locationCity && this.locationState) {
+          // For city feed: show city and state
+          return `${this.locationCity}, ${this.locationState}`;
+        } else if (this.locationFormattedAddress) {
+          // Use the full formatted address if available
+          return this.locationFormattedAddress;
+        } else if (this.locationCity) {
+          // Fallback to just city
+          return this.locationCity;
+        }
+        return 'Unknown Location';
+      }
     },
     microCommunityId: {
       type: DataTypes.STRING,
@@ -118,12 +148,32 @@ export default (sequelize) => {
     
     // Engagement
     reactions: {
-      type: DataTypes.JSONB,
-      defaultValue: {
+      type: DataTypes.TEXT,
+      defaultValue: JSON.stringify({
         likes: [],
         dislikes: [],
         hearts: [],
         laughs: []
+      }),
+      get() {
+        const value = this.getDataValue('reactions');
+        if (typeof value === 'string') {
+          try {
+            return JSON.parse(value);
+          } catch (e) {
+
+            return { likes: [], dislikes: [], hearts: [], laughs: [] };
+          }
+        }
+        return value || { likes: [], dislikes: [], hearts: [], laughs: [] };
+      },
+      set(value) {
+        if (typeof value === 'object') {
+          this.setDataValue('reactions', JSON.stringify(value));
+        } else {
+
+          this.setDataValue('reactions', JSON.stringify({ likes: [], dislikes: [], hearts: [], laughs: [] }));
+        }
       }
     },
     
@@ -337,15 +387,39 @@ export default (sequelize) => {
   };
 
   Post.prototype.hasUserReacted = function(userId, reactionType = 'likes') {
-    const reactions = this.reactions || {};
-    if (!reactions[reactionType]) return false;
-    return reactions[reactionType].some(reaction => 
+    let reactions = this.reactions || {};
+    
+    // If reactions is a string, try to parse it
+    if (typeof reactions === 'string') {
+      try {
+        reactions = JSON.parse(reactions);
+      } catch (e) {
+        return false;
+      }
+    }
+    
+    if (!reactions[reactionType]) {
+      return false;
+    }
+    
+    const hasReacted = reactions[reactionType].some(reaction => 
       reaction.user === userId.toString()
     );
+    
+    return hasReacted;
   };
 
   Post.prototype.addReaction = async function(userId, reactionType = 'likes') {
-    const reactions = this.reactions || { likes: [], dislikes: [], hearts: [], laughs: [] };
+    let reactions = this.reactions || { likes: [], dislikes: [], hearts: [], laughs: [] };
+    
+    // If reactions is a string, try to parse it
+    if (typeof reactions === 'string') {
+      try {
+        reactions = JSON.parse(reactions);
+      } catch (e) {
+        reactions = { likes: [], dislikes: [], hearts: [], laughs: [] };
+      }
+    }
     
     // Remove existing reaction of same type
     reactions[reactionType] = reactions[reactionType].filter(
@@ -368,11 +442,25 @@ export default (sequelize) => {
     });
     
     this.reactions = reactions;
-    return this.save();
+    
+    // Try to save with explicit field specification
+    const result = await this.save({ fields: ['reactions'] });
+    
+    return result;
   };
 
   Post.prototype.removeReaction = async function(userId, reactionType = 'likes') {
-    const reactions = this.reactions || {};
+    let reactions = this.reactions || {};
+    
+    // If reactions is a string, try to parse it
+    if (typeof reactions === 'string') {
+      try {
+        reactions = JSON.parse(reactions);
+      } catch (e) {
+        reactions = {};
+      }
+    }
+    
     if (!reactions[reactionType]) return this.save();
     
     reactions[reactionType] = reactions[reactionType].filter(
@@ -422,6 +510,21 @@ export default (sequelize) => {
     }
     
     return post;
+  };
+
+  Post.prototype.recalculateCommentCount = async function() {
+    const { Comment } = require('../../models/index.js');
+    const commentCount = await Comment.count({
+      where: {
+        postId: this.id,
+        status: 'active'
+      }
+    });
+    
+    this.commentsCount = commentCount;
+    await this.save({ fields: ['commentsCount'] });
+    
+    return commentCount;
   };
 
   Post.associate = (models) => {
