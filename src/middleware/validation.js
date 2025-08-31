@@ -147,15 +147,15 @@ export const validateUpdatePost = [
 // Comment validation rules
 export const validateCreateComment = [
   param('postId')
-    .isMongoId()
+    .isUUID()
     .withMessage('Invalid post ID'),
   body('content')
     .trim()
     .isLength({ min: 1, max: 1000 })
     .withMessage('Comment must be between 1 and 1000 characters'),
-  body('parentComment')
+  body('parentId')
     .optional()
-    .isMongoId()
+    .isUUID()
     .withMessage('Invalid parent comment ID'),
   handleValidationErrors
 ];

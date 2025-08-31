@@ -643,20 +643,21 @@ router.post('/:postId/comments', authenticate, validateComment, asyncHandler(asy
     data: { 
       comment: {
         id: populatedComment.id,
-        content: populatedComment.content,
+        content: populatedComment.content || '',
         postId: populatedComment.postId,
         parentId: populatedComment.parentId,
-        likesCount: populatedComment.likes || 0,
+        likesCount: populatedComment.getLikesCount ? populatedComment.getLikesCount() : 0,
+        repliesCount: 0,
         createdAt: populatedComment.createdAt,
         updatedAt: populatedComment.updatedAt,
         author: {
           id: populatedComment.author.id,
-          displayName: populatedComment.author.displayName,
-          username: populatedComment.author.username,
-          avatarUrl: populatedComment.author.avatar_url
+          displayName: populatedComment.author.displayName || '',
+          username: populatedComment.author.username || '',
+          avatar_url: populatedComment.author.avatar_url || ''
         },
         replies: [],
-        isLiked: false
+        isLiked: populatedComment.hasUserLiked ? populatedComment.hasUserLiked(req.user.id) : false
       }
     }
   });
@@ -815,7 +816,8 @@ router.get('/:postId/comments', authenticate, asyncHandler(async (req, res) => {
 
   const whereClause = {
     postId,
-    parentId: parentId || null // If parentId is not provided, get top-level comments
+    parentId: parentId || null, // If parentId is not provided, get top-level comments
+    status: 'active' // Only get active comments
   };
 
   const comments = await Comment.findAndCountAll({
@@ -829,6 +831,7 @@ router.get('/:postId/comments', authenticate, asyncHandler(async (req, res) => {
       {
         model: Comment,
         as: 'replies',
+        where: { status: 'active' }, // Only get active replies
         include: [{
           model: User,
           as: 'author',
@@ -837,7 +840,7 @@ router.get('/:postId/comments', authenticate, asyncHandler(async (req, res) => {
         limit: 3 // Only get first 3 replies by default
       }
     ],
-    order: [['createdAt', 'DESC']],
+    order: [['created_at', 'DESC']],
     limit: parseInt(limit),
     offset: parseInt(offset)
   });
@@ -859,11 +862,22 @@ router.get('/:postId/comments', authenticate, asyncHandler(async (req, res) => {
       likesCount = 0;
     }
     
-    return {
+    // Ensure content is always present and author field is properly structured
+    const safeCommentData = {
       ...commentData,
+      content: commentData.content || '',
       isLiked,
-      likesCount
+      likesCount,
+      repliesCount: commentData.replies ? commentData.replies.length : 0,
+      author: commentData.author || {
+        id: '',
+        displayName: '',
+        username: '',
+        avatar_url: ''
+      }
     };
+    
+    return safeCommentData;
   });
 
   res.json({
@@ -901,7 +915,7 @@ router.put('/:postId/comments/:commentId', authenticate, validateComment, asyncH
   }
 
   // Check if user is the author of the comment
-  if (comment.author_id !== req.user.id) {
+  if (comment.userId !== req.user.id) {
     return res.status(403).json({
       success: false,
       message: 'Not authorized to edit this comment'
@@ -924,20 +938,21 @@ router.put('/:postId/comments/:commentId', authenticate, validateComment, asyncH
     data: { 
       comment: {
         id: updatedComment.id,
-        content: updatedComment.content,
+        content: updatedComment.content || '',
         postId: updatedComment.postId,
         parentId: updatedComment.parentId,
-        likesCount: updatedComment.likes || 0,
+        likesCount: updatedComment.getLikesCount ? updatedComment.getLikesCount() : 0,
+        repliesCount: 0,
         createdAt: updatedComment.createdAt,
         updatedAt: updatedComment.updatedAt,
         author: {
           id: updatedComment.author.id,
-          displayName: updatedComment.author.displayName,
-          username: updatedComment.author.username,
-          avatarUrl: updatedComment.author.avatar_url
+          displayName: updatedComment.author.displayName || '',
+          username: updatedComment.author.username || '',
+          avatar_url: updatedComment.author.avatar_url || ''
         },
         replies: [],
-        isLiked: false
+        isLiked: updatedComment.hasUserLiked ? updatedComment.hasUserLiked(req.user.id) : false
       }
     }
   });
@@ -967,7 +982,7 @@ router.delete('/:postId/comments/:commentId', authenticate, asyncHandler(async (
 
   // Check if user is the author of the comment or the post
   const post = await Post.findByPk(postId);
-  if (comment.author_id !== req.user.id && post.author_id !== req.user.id) {
+  if (comment.userId !== req.user.id && post.author_id !== req.user.id) {
     return res.status(403).json({
       success: false,
       message: 'Not authorized to delete this comment'

@@ -20,7 +20,7 @@ export default (sequelize) => {
     allowNull: false
   },
   action: {
-    type: DataTypes.ENUM('delete', 'hide', 'restore', 'ban', 'unban', 'resolve_report'),
+    type: DataTypes.ENUM('delete', 'hide', 'restore', 'ban', 'unban', 'resolve_report', 'activate', 'suspend', 'warn', 'remove', 'approve', 'promote'),
     allowNull: false
   },
   targetId: {
