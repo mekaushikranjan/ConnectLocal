@@ -394,9 +394,9 @@ class CityGroupService {
   }
 
   /**
-   * Get user's city group memberships
+   * Get user's city group memberships with real member counts
    * @param {string} userId - User ID
-   * @returns {Promise<Array>} Array of city group memberships
+   * @returns {Promise<Array>} City group memberships
    */
   async getUserCityGroupMemberships(userId) {
     try {
@@ -425,28 +425,33 @@ class CityGroupService {
         }
       });
 
-      const result = memberships.map(membership => ({
-        id: membership.group.id,
-        name: membership.group.name,
-        description: membership.group.description,
-        category: 'city',
-        privacy: 'public',
-        memberCount: membership.group.member_count,
-        postCount: membership.group.post_count,
-        isJoined: true,
-        isAdmin: membership.role === 'admin',
-        isModerator: membership.role === 'moderator',
-        userRole: membership.role,
-        createdAt: membership.group.created_at || new Date(),
-        updatedAt: membership.group.updated_at || new Date(),
-        location: membership.group.location_json,
-        location_json: membership.group.location_json,
-        createdBy: {
-          id: membership.group.created_by,
-          displayName: membership.group.creator?.displayName || 'Unknown',
-          username: membership.group.creator?.username,
-          avatarUrl: membership.group.creator?.avatar_url
-        }
+      // Calculate real member counts for each group
+      const result = await Promise.all(memberships.map(async (membership) => {
+        const realMemberCount = await this.calculateRealMemberCount(membership.group.id);
+        
+        return {
+          id: membership.group.id,
+          name: membership.group.name,
+          description: membership.group.description,
+          category: 'city',
+          privacy: 'public',
+          memberCount: realMemberCount,
+          postCount: membership.group.post_count,
+          isJoined: true,
+          isAdmin: membership.role === 'admin',
+          isModerator: membership.role === 'moderator',
+          userRole: membership.role,
+          createdAt: membership.group.created_at || new Date(),
+          updatedAt: membership.group.updated_at || new Date(),
+          location: membership.group.location_json,
+          location_json: membership.group.location_json,
+          createdBy: {
+            id: membership.group.created_by,
+            displayName: membership.group.creator?.displayName || 'Unknown',
+            username: membership.group.creator?.username,
+            avatarUrl: membership.group.creator?.avatar_url
+          }
+        };
       }));
 
       return result;
@@ -1104,9 +1109,32 @@ class CityGroupService {
   }
 
   /**
-   * Get user's street group memberships
+   * Calculate real member count for a group
+   * @param {string} groupId - Group ID
+   * @returns {Promise<number>} Real member count
+   */
+  async calculateRealMemberCount(groupId) {
+    try {
+      const { GroupMember } = await import('../models/index.js');
+      
+      const count = await GroupMember.count({
+        where: {
+          group_id: groupId,
+          status: 'active'
+        }
+      });
+      
+      return count;
+    } catch (error) {
+      console.error('Error calculating real member count:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Get user's street group memberships with real member counts
    * @param {string} userId - User ID
-   * @returns {Promise<Array>} Array of street group memberships
+   * @returns {Promise<Array>} Street group memberships
    */
   async getUserStreetGroupMemberships(userId) {
     try {
@@ -1185,62 +1213,72 @@ class CityGroupService {
           
           console.log(`✅ After auto-join, found ${newMemberships.length} street group memberships`);
           
-          const result = newMemberships.map(membership => ({
-            id: membership.group.id,
-            name: membership.group.name,
-            description: membership.group.description,
-            category: 'street',
-            privacy: 'public',
-            memberCount: membership.group.member_count,
-            postCount: membership.group.post_count,
-            isJoined: true,
-            isAdmin: membership.role === 'admin',
-            isModerator: membership.role === 'moderator',
-            userRole: membership.role,
-            createdAt: membership.group.created_at || new Date(),
-            updatedAt: membership.group.updated_at || new Date(),
-            location: membership.group.location_json,
-            location_json: membership.group.location_json,
-            createdBy: {
-              id: membership.group.created_by,
-              displayName: membership.group.creator?.displayName || 'Unknown',
-              username: membership.group.creator?.username,
-              avatarUrl: membership.group.creator?.avatar_url
-            }
+          // Calculate real member counts for each group
+          const result = await Promise.all(newMemberships.map(async (membership) => {
+            const realMemberCount = await this.calculateRealMemberCount(membership.group.id);
+            
+            return {
+              id: membership.group.id,
+              name: membership.group.name,
+              description: membership.group.description,
+              category: 'street',
+              privacy: 'public',
+              memberCount: realMemberCount,
+              postCount: membership.group.post_count,
+              isJoined: true,
+              isAdmin: membership.role === 'admin',
+              isModerator: membership.role === 'moderator',
+              userRole: membership.role,
+              createdAt: membership.group.created_at || new Date(),
+              updatedAt: membership.group.updated_at || new Date(),
+              location: membership.group.location_json,
+              location_json: membership.group.location_json,
+              createdBy: {
+                id: membership.group.created_by,
+                displayName: membership.group.creator?.displayName || 'Unknown',
+                username: membership.group.creator?.username,
+                avatarUrl: membership.group.creator?.avatar_url
+              }
+            };
           }));
 
-          console.log(`📋 Returning ${result.length} street groups:`, result.map(g => g.name));
+          console.log(`📋 Returning ${result.length} street groups:`, result.map(g => `${g.name} (${g.memberCount} members)`));
           return result;
         } catch (autoJoinError) {
           console.error('❌ Auto-join street group failed:', autoJoinError);
         }
       }
 
-      const result = memberships.map(membership => ({
-        id: membership.group.id,
-        name: membership.group.name,
-        description: membership.group.description,
-        category: 'street',
-        privacy: 'public',
-        memberCount: membership.group.member_count,
-        postCount: membership.group.post_count,
-        isJoined: true,
-        isAdmin: membership.role === 'admin',
-        isModerator: membership.role === 'moderator',
-        userRole: membership.role,
-        createdAt: membership.group.created_at || new Date(),
-        updatedAt: membership.group.updated_at || new Date(),
-        location: membership.group.location_json,
-        location_json: membership.group.location_json,
-        createdBy: {
-          id: membership.group.created_by,
-          displayName: membership.group.creator?.displayName || 'Unknown',
-          username: membership.group.creator?.username,
-          avatarUrl: membership.group.creator?.avatar_url
-        }
+      // Calculate real member counts for each group
+      const result = await Promise.all(memberships.map(async (membership) => {
+        const realMemberCount = await this.calculateRealMemberCount(membership.group.id);
+        
+        return {
+          id: membership.group.id,
+          name: membership.group.name,
+          description: membership.group.description,
+          category: 'street',
+          privacy: 'public',
+          memberCount: realMemberCount,
+          postCount: membership.group.post_count,
+          isJoined: true,
+          isAdmin: membership.role === 'admin',
+          isModerator: membership.role === 'moderator',
+          userRole: membership.role,
+          createdAt: membership.group.created_at || new Date(),
+          updatedAt: membership.group.updated_at || new Date(),
+          location: membership.group.location_json,
+          location_json: membership.group.location_json,
+          createdBy: {
+            id: membership.group.created_by,
+            displayName: membership.group.creator?.displayName || 'Unknown',
+            username: membership.group.creator?.username,
+            avatarUrl: membership.group.creator?.avatar_url
+          }
+        };
       }));
 
-      console.log(`📋 Returning ${result.length} street groups:`, result.map(g => g.name));
+      console.log(`📋 Returning ${result.length} street groups:`, result.map(g => `${g.name} (${g.memberCount} members)`));
       return result;
     } catch (error) {
       console.error('❌ Error getting street group memberships:', error);
