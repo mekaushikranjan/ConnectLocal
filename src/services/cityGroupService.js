@@ -440,6 +440,7 @@ class CityGroupService {
         createdAt: membership.group.created_at || new Date(),
         updatedAt: membership.group.updated_at || new Date(),
         location: membership.group.location_json,
+        location_json: membership.group.location_json,
         createdBy: {
           id: membership.group.created_by,
           displayName: membership.group.creator?.displayName || 'Unknown',
@@ -1250,6 +1251,7 @@ class CityGroupService {
         createdAt: membership.group.created_at || new Date(),
         updatedAt: membership.group.updated_at || new Date(),
         location: membership.group.location_json,
+        location_json: membership.group.location_json,
         createdBy: {
           id: membership.group.created_by,
           displayName: membership.group.creator?.displayName || 'Unknown',
