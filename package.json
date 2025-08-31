@@ -94,10 +94,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/localconnect-backend.git"
+    "url": "https://github.com/mekaushikranjan/ConnectLocal.git"
   },
   "bugs": {
-    "url": "https://github.com/your-username/localconnect-backend/issues"
+    "url": "https://github.com/mekaushikranjan/ConnectLocal/issues"
   },
-  "homepage": "https://github.com/your-username/localconnect-backend#readme"
+  "homepage": "https://github.com/mekaushikranjan/ConnectLocal#readme"
 }

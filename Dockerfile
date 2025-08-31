@@ -6,10 +6,9 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
-COPY .npmrc ./
 
-# Install dependencies using the new syntax
-RUN npm ci --omit=dev --silent
+# Install dependencies (using npm install instead of npm ci for better compatibility)
+RUN npm install --omit=dev --silent --no-audit --no-fund
 
 # Copy source code
 COPY . .
