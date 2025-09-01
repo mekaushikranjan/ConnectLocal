@@ -148,7 +148,7 @@ router.post('/register', asyncHandler(async (req, res) => {
 
   // Generate email verification token
   const verificationToken = crypto.randomBytes(32).toString('hex');
-  const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+  const verificationExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
   // Create user
   // Derive name parts if needed
@@ -164,9 +164,7 @@ router.post('/register', asyncHandler(async (req, res) => {
     finalDisplayName = [derivedFirst, derivedLast].filter(Boolean).join(' ').trim();
   }
 
-  // Auto-verify email in development mode
-  const shouldAutoVerify = process.env.NODE_ENV === 'development' || process.env.AUTO_VERIFY_EMAIL === 'true';
-
+  // Always require email verification in all environments
   const user = await User.create({
     email: email.toLowerCase(),
     password,
@@ -176,7 +174,7 @@ router.post('/register', asyncHandler(async (req, res) => {
     phone_number: phoneNumber,
     email_verification_token: verificationToken,
     email_verification_expires: verificationExpires,
-    email_verified: shouldAutoVerify // Auto-verify in development
+    email_verified: false // Always require email verification
   });
 
   // Send verification email
@@ -199,9 +197,7 @@ router.post('/register', asyncHandler(async (req, res) => {
 
   res.status(201).json({
     success: true,
-    message: shouldAutoVerify 
-      ? 'User registered successfully and email auto-verified (development mode).'
-      : 'User registered successfully. Please check your email for verification.',
+    message: 'User registered successfully. Please check your email for verification.',
     data: {
       user: {
         id: user.id,
@@ -214,10 +210,8 @@ router.post('/register', asyncHandler(async (req, res) => {
         status: user.status,
         createdAt: user.createdAt
       },
-      requiresVerification: !shouldAutoVerify,
-      message: shouldAutoVerify 
-        ? 'Email auto-verified in development mode.'
-        : 'Please check your email and click the verification link to complete your registration.'
+      requiresVerification: true,
+      message: 'Please check your email and click the verification link to complete your registration.'
     }
   });
 }));
@@ -339,17 +333,12 @@ router.post('/login', asyncHandler(async (req, res) => {
   }
 
   // Check if email is verified - BLOCK LOGIN IF NOT VERIFIED
-  // In development mode, auto-verify email for testing
   if (!user.email_verified) {
-    if (process.env.NODE_ENV === 'development' || process.env.AUTO_VERIFY_EMAIL === 'true') {
-      await user.update({ email_verified: true });
-    } else {
-      return res.status(401).json({
-        success: false,
-        message: 'Please verify your email address before logging in. Check your inbox for the verification link.',
-        requiresVerification: true
-      });
-    }
+    return res.status(401).json({
+      success: false,
+      message: 'Please verify your email address before logging in. Check your inbox for the verification link.',
+      requiresVerification: true
+    });
   }
 
   // Check if account is active
@@ -1717,7 +1706,7 @@ router.post('/resend-verification', authenticate, asyncHandler(async (req, res) 
 
   // Generate new verification token
   const verificationToken = crypto.randomBytes(32).toString('hex');
-  const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+  const verificationExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
   await req.user.update({
     email_verification_token: verificationToken,
@@ -1776,7 +1765,7 @@ router.post('/resend-verification-public', asyncHandler(async (req, res) => {
 
   // Generate new verification token
   const verificationToken = crypto.randomBytes(32).toString('hex');
-  const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+  const verificationExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
   await user.update({
     email_verification_token: verificationToken,

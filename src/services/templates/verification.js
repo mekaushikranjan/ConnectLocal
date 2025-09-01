@@ -205,7 +205,8 @@ export const verificationTemplate = (name, verificationUrl) => `
       </div>
       
       <div class="note">
-        <p><strong>Important:</strong> This verification link will expire in 24 hours.</p>
+        <p><strong>Important:</strong> This verification link will expire in 10 minutes for security.</p>
+        <p>If the link expires, you can request a new verification email from the app.</p>
         <p>If you didn't create an account with LocalConnect, please ignore this email.</p>
       </div>
     </div>

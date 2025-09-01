@@ -15,14 +15,14 @@ class EmailService {
 
   initializeTransporter() {
     try {
-      // Check if we have production email credentials
-      const hasProductionCredentials = 
+      // Check if we have SMTP email credentials
+      const hasSmtpCredentials = 
         process.env.EMAIL_HOST && 
         process.env.EMAIL_USER && 
         process.env.EMAIL_PASS;
 
-      if (process.env.NODE_ENV === 'production' && hasProductionCredentials) {
-        // Production: Use real SMTP
+      if (hasSmtpCredentials) {
+        // Use SMTP configuration
         this.transporter = nodemailer.createTransport({
           host: process.env.EMAIL_HOST,
           port: Number(process.env.EMAIL_PORT) || 587,
@@ -31,13 +31,9 @@ class EmailService {
             user: process.env.EMAIL_USER,
             pass: process.env.EMAIL_PASS
           },
-          // Additional production settings
-          pool: true,
-          maxConnections: 5,
-          maxMessages: 100,
-          rateLimit: 14, // Limit to 14 emails per second
           tls: {
-            rejectUnauthorized: false
+            rejectUnauthorized: false,
+            ciphers: 'SSLv3'
           }
         });
 
@@ -75,7 +71,6 @@ class EmailService {
           }
         });
       } else {
-        // Development/Test mode: Use stream transport
         this.transporter = nodemailer.createTransport({
           streamTransport: true,
           buffer: true,
@@ -92,25 +87,40 @@ class EmailService {
     }
   }
 
+
+
   async verifyConnection() {
     try {
+      console.log('Email Config:', {
+        host: process.env.EMAIL_HOST,
+        port: process.env.EMAIL_PORT,
+        user: process.env.EMAIL_USER,
+        secure: process.env.EMAIL_SECURE,
+        hasPass: !!process.env.EMAIL_PASS
+      });
       await this.transporter.verify();
     } catch (error) {
-      throw new Error('Email service configuration is invalid');
+      console.error('Email verification error details:', error);
+      throw new Error(`Email service configuration is invalid: ${error.message}`);
     }
   }
 
   async sendEmailWithRetry(to, subject, html, attachments = [], retryCount = 0) {
     try {
-      // Verify connection before sending (only for production SMTP)
-      if (process.env.NODE_ENV === 'production' && 
-          process.env.EMAIL_HOST && 
+      // Verify connection before sending
+      // Only verify SMTP connection if configured
+      if (process.env.EMAIL_HOST && 
           process.env.EMAIL_USER && 
           process.env.EMAIL_PASS) {
         try {
           await this.verifyConnection();
         } catch (error) {
-          console.warn('Email service verification failed, continuing with send attempt:', error.message);
+          // Fallback to stream transport for development
+          this.transporter = nodemailer.createTransport({
+            streamTransport: true,
+            buffer: true,
+            newline: 'unix'
+          });
         }
       }
 
@@ -129,7 +139,6 @@ class EmailService {
       };
 
       const info = await this.transporter.sendMail(mailOptions);
-        
       return info;
     } catch (error) {
       if (retryCount < this.maxRetries && this.isRetryableError(error)) {
